@@ -1,0 +1,92 @@
+"""Data models and schemas for NokChart."""
+
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+
+class EventType(str, Enum):
+    """Event types."""
+
+    CHAT = "chat"
+    DONATION = "donation"
+
+
+class StreamStatus(str, Enum):
+    """Stream status."""
+
+    OFFLINE = "OFFLINE"
+    LIVE = "LIVE"
+
+
+class ChatEvent(BaseModel):
+    """Chat event model matching events.jsonl schema."""
+
+    stream_id: str
+    type: EventType
+    t_ms: int  # Relative time from stream start in milliseconds
+    user: Optional[str] = None
+    user_id: Optional[str] = None
+    text: Optional[str] = None
+    amount: Optional[int] = None  # For donation events
+    message_id: Optional[str] = None
+    received_at: Optional[datetime] = None
+    raw: Optional[dict[str, Any]] = None
+
+
+class Peak(BaseModel):
+    """Peak interval model."""
+
+    start_sec: int
+    end_sec: int
+    value: int  # Chat count or spike score
+    rank: int
+
+
+class PeaksOutput(BaseModel):
+    """Peaks output model matching peaks.json schema."""
+
+    stream_id: str
+    window_sec: int
+    peaks: list[Peak]
+
+
+class StreamInfo(BaseModel):
+    """Stream information."""
+
+    stream_id: str
+    channel_id: str
+    title: Optional[str] = None
+    status: StreamStatus
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+
+
+class Config(BaseModel):
+    """Configuration model."""
+
+    # Chzzk API credentials
+    chzzk_client_id: Optional[str] = None
+    chzzk_client_secret: Optional[str] = None
+
+    # Watcher settings
+    poll_interval_sec: int = 60
+    restart_resume: bool = True
+    idle_timeout_minutes: int = 10  # Stop collecting if no chat for N minutes
+
+    # Peak detection settings
+    peak_window_sec: int = 60
+    topk: int = 50
+    min_peak_gap_sec: int = 120
+
+    # Aggregation settings
+    rolling_sec: int = 10
+
+    # Output settings
+    outdir: str = "output"
+
+    # Retry settings
+    max_retries: int = 5
+    backoff_factor: int = 2

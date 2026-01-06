@@ -1,0 +1,365 @@
+"""Command-line interface for NokChart."""
+
+import asyncio
+import json
+import logging
+import sys
+from pathlib import Path
+
+import click
+
+from nokchart.aggregation import Aggregator
+from nokchart.config import load_channels, load_channel_names, load_config
+from nokchart.peak_detection import PeakDetector
+from nokchart.visualization import ChartGenerator
+from nokchart.watcher import Watcher
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
+@click.group()
+@click.version_option(version="0.1.0")
+def cli():
+    """NokChart - Chat trend collection and peak analysis tool for Chzzk streams."""
+    pass
+
+
+@cli.command()
+@click.option(
+    "--channels",
+    type=click.Path(exists=True, path_type=Path),
+    default="channels.yaml",
+    help="Path to channels YAML file",
+)
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    default="config.yaml",
+    help="Path to config YAML file",
+)
+def watch(channels: Path, config: Path):
+    """Watch channels and automatically collect chat events when streams go live."""
+    logger.info("Starting NokChart watcher")
+
+    # Load configuration
+    cfg = load_config(config)
+    channel_ids = load_channels(channels)
+    channel_names = load_channel_names(channels)
+
+    if not channel_ids:
+        logger.error("No channels configured. Please add channel IDs to channels.yaml")
+        sys.exit(1)
+
+    logger.info(f"Monitoring {len(channel_ids)} channels: {channel_ids}")
+
+    # Create and start watcher
+    watcher = Watcher(channel_ids=channel_ids, config=cfg, channel_names=channel_names)
+
+    try:
+        asyncio.run(watcher.start())
+    except KeyboardInterrupt:
+        logger.info("Received interrupt signal, stopping watcher")
+        asyncio.run(watcher.stop())
+
+
+@cli.command()
+@click.option("--channel", required=True, help="Channel ID to collect from")
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    default="output",
+    help="Output directory",
+)
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    default="config.yaml",
+    help="Path to config YAML file",
+)
+def collect(channel: str, out: Path, config: Path):
+    """Manually collect chat events from a live stream."""
+    logger.info(f"Manual collection for channel: {channel}")
+    logger.warning(
+        "Manual collection requires the stream to be live. "
+        "This is a manual trigger - use 'watch' for automatic collection."
+    )
+
+    # This would need actual implementation to get stream info
+    click.echo("Manual collection not yet fully implemented.")
+    click.echo("Please use 'nokchart watch' for automatic collection.")
+
+
+@cli.command("build-ts")
+@click.option(
+    "--events",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to events.jsonl file",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    help="Output directory (defaults to same as events file)",
+)
+@click.option(
+    "--buckets",
+    default="1,5,60",
+    help="Comma-separated bucket sizes in seconds",
+)
+@click.option(
+    "--rolling",
+    type=int,
+    default=10,
+    help="Rolling average window in seconds",
+)
+def build_ts(events: Path, out: Path, buckets: str, rolling: int):
+    """Build time series from events.jsonl file."""
+    logger.info(f"Building time series from {events}")
+
+    # Parse bucket sizes
+    bucket_sizes = [int(b.strip()) for b in buckets.split(",")]
+
+    # Default output to same directory as events
+    if out is None:
+        out = events.parent
+
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Create aggregator and build time series
+    aggregator = Aggregator(events)
+    output_files = aggregator.build_time_series(
+        output_dir=out,
+        bucket_sizes=bucket_sizes,
+        rolling_window=rolling,
+    )
+
+    # Get statistics
+    stats = aggregator.get_statistics()
+
+    click.echo("\nTime series created:")
+    for bucket, file_path in output_files.items():
+        click.echo(f"  {bucket}: {file_path}")
+
+    click.echo(f"\nStatistics:")
+    click.echo(f"  Total events: {stats.get('total_events', 0)}")
+    click.echo(f"  Chat events: {stats.get('chat_events', 0)}")
+    click.echo(f"  Donation events: {stats.get('donation_events', 0)}")
+    click.echo(f"  Duration: {stats.get('duration_sec', 0):.1f}s")
+
+
+@cli.command()
+@click.option(
+    "--ts",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to time series CSV file",
+)
+@click.option(
+    "--stream-id",
+    required=True,
+    help="Stream ID",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    help="Output file path for peaks.json",
+)
+@click.option(
+    "--window",
+    type=int,
+    default=60,
+    help="Peak detection window size in seconds",
+)
+@click.option(
+    "--topk",
+    type=int,
+    default=50,
+    help="Number of top peaks to extract",
+)
+@click.option(
+    "--min-gap",
+    type=int,
+    default=120,
+    help="Minimum gap between peaks in seconds",
+)
+def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: int):
+    """Detect peaks in chat activity time series."""
+    logger.info(f"Detecting peaks in {ts}")
+
+    # Default output path
+    if out is None:
+        out = ts.parent / "peaks.json"
+
+    # Create detector and find peaks
+    detector = PeakDetector(ts)
+    peaks_output = detector.detect_peaks(
+        stream_id=stream_id,
+        window_sec=window,
+        topk=topk,
+        min_gap_sec=min_gap,
+    )
+
+    # Save peaks
+    detector.save_peaks(peaks_output, out)
+
+    # Generate summary
+    summary = detector.generate_summary(peaks_output)
+
+    click.echo(f"\nPeaks saved to: {out}")
+    click.echo(f"\nSummary:")
+    click.echo(f"  Peak count: {summary['peak_count']}")
+    click.echo(f"  Total activity: {summary['total_activity']}")
+    if summary['peak_count'] > 0:
+        click.echo(f"  Average peak value: {summary['avg_peak_value']:.1f}")
+        click.echo(f"  Max peak value: {summary['max_peak_value']}")
+        click.echo(f"\nTop peak:")
+        top = summary['top_peak']
+        click.echo(f"  Time: {top['start_sec']}s - {top['end_sec']}s")
+        click.echo(f"  Value: {top['value']}")
+
+
+@cli.command()
+@click.option(
+    "--ts",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to time series CSV file",
+)
+@click.option(
+    "--peaks",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to peaks.json file (optional)",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    help="Output file path for chart image",
+)
+@click.option(
+    "--title",
+    help="Chart title",
+)
+def plot(ts: Path, peaks: Path, out: Path, title: str):
+    """Generate chat activity chart."""
+    logger.info(f"Plotting chart from {ts}")
+
+    # Default output path
+    if out is None:
+        out = ts.parent / "chart_chat_rate.png"
+
+    # Load peaks if provided
+    peaks_data = None
+    if peaks:
+        with open(peaks) as f:
+            peaks_dict = json.load(f)
+            from nokchart.models import PeaksOutput
+
+            peaks_data = PeaksOutput(**peaks_dict)
+
+    # Generate chart
+    generator = ChartGenerator(ts)
+    generator.plot_chat_rate(
+        output_file=out,
+        peaks=peaks_data,
+        title=title,
+    )
+
+    click.echo(f"Chart saved to: {out}")
+
+
+@cli.command()
+@click.option(
+    "--stream-dir",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Stream output directory containing events.jsonl",
+)
+@click.option(
+    "--stream-id",
+    required=True,
+    help="Stream ID",
+)
+def process(stream_dir: Path, stream_id: str):
+    """Process a completed stream: build time series, detect peaks, and generate chart."""
+    logger.info(f"Processing stream directory: {stream_dir}")
+
+    events_file = stream_dir / "events.jsonl"
+    if not events_file.exists():
+        logger.error(f"events.jsonl not found in {stream_dir}")
+        sys.exit(1)
+
+    # Step 1: Build time series
+    click.echo("Step 1: Building time series...")
+    aggregator = Aggregator(events_file)
+    output_files = aggregator.build_time_series(
+        output_dir=stream_dir,
+        bucket_sizes=[60, 300],  # 1분, 5분 단위
+        rolling_window=600,  # 10분 rolling average
+    )
+
+    if not output_files:
+        logger.error("Failed to build time series")
+        sys.exit(1)
+
+    ts_file = output_files.get("60s")  # Use 1-minute bucket
+    click.echo(f"  Created: {ts_file}")
+
+    # Step 2: Detect peaks
+    click.echo("\nStep 2: Detecting peaks...")
+    detector = PeakDetector(ts_file)
+    peaks_output = detector.detect_peaks(
+        stream_id=stream_id,
+        window_sec=60,
+        topk=50,
+        min_gap_sec=120,
+    )
+
+    peaks_file = stream_dir / "peaks.json"
+    detector.save_peaks(peaks_output, peaks_file)
+    click.echo(f"  Created: {peaks_file}")
+    click.echo(f"  Found {len(peaks_output.peaks)} peaks")
+
+    # Step 3: Generate chart
+    click.echo("\nStep 3: Generating chart...")
+    chart_file = stream_dir / "chart_chat_rate.png"
+    generator = ChartGenerator(ts_file)
+    generator.plot_chat_rate(
+        output_file=chart_file,
+        peaks=peaks_output,
+    )
+    click.echo(f"  Created: {chart_file}")
+
+    # Generate report
+    click.echo("\nGenerating report...")
+    stats = aggregator.get_statistics()
+    summary = detector.generate_summary(peaks_output)
+
+    report = {
+        "stream_id": stream_id,
+        "processed_at": str(Path.cwd()),
+        "files": {
+            "events": str(events_file),
+            "time_series": {k: str(v) for k, v in output_files.items()},
+            "peaks": str(peaks_file),
+            "chart": str(chart_file),
+        },
+        "statistics": stats,
+        "peaks_summary": summary,
+    }
+
+    report_file = stream_dir / "report.json"
+    with open(report_file, "w") as f:
+        json.dump(report, f, indent=2)
+
+    click.echo(f"  Created: {report_file}")
+    click.echo("\nProcessing complete!")
+
+
+if __name__ == "__main__":
+    cli()

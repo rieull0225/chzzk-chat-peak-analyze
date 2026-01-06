@@ -1,0 +1,6 @@
+# Channels to monitor
+# Format: - "channel_id"  # streamer_name
+channels:
+  - "channel_id_1"  # 스트리머1
+  - "channel_id_2"  # 스트리머2
+  - "channel_id_3"  # 스트리머3

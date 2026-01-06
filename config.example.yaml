@@ -1,0 +1,26 @@
+# NokChart Configuration
+
+# Chzzk API Credentials
+# Get your credentials from: https://developers.chzzk.naver.com
+chzzk_client_id: "your-client-id-here"
+chzzk_client_secret: "your-client-secret-here"
+
+# Watcher settings
+poll_interval_sec: 60  # How often to check stream status
+restart_resume: true   # Resume collection on restart
+idle_timeout_minutes: 30  # Stop collecting and process data if no chat for N minutes
+
+# Peak detection settings
+peak_window_sec: 60    # Window size for peak detection
+topk: 50               # Number of top peaks to extract
+min_peak_gap_sec: 120  # Minimum gap between peaks
+
+# Aggregation settings
+rolling_sec: 600       # Rolling average window (10분, for 1-minute buckets)
+
+# Output settings
+outdir: "output"       # Base output directory
+
+# Retry settings
+max_retries: 5
+backoff_factor: 2
