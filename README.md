@@ -8,22 +8,76 @@ NokChart는 치지직 채널을 자동으로 모니터링하고, 방송이 시�
 
 - **자동 방송 모니터링**: 여러 채널을 감시하고 방송이 시작되면 자동으로 수집 시작
 - **채팅 이벤트 수집**: 정확한 타임스탬프와 함께 채팅 메시지 및 도네이션 수집
+- **세션 안정성**: 장시간 방송(6시간+) 동안 끊김 없는 채팅 수집
 - **피크 탐지**: 슬라이딩 윈도우 분석을 사용하여 높은 활동성을 보이는 채팅 구간 식별
-- **시계열 생성**: 1초, 5초, 60초 단위 시계열 및 이동 평균 생성
-- **시각화**: 피크 구간이 강조된 채팅 활동 추이 PNG 차트 생성
+- **시계열 생성**: 1분, 5분 단위 시계열 및 이동 평균 생성
+- **시각화**: 피크 구간이 강조된 채팅 활동 추이 PNG 차트 생성 (실제 방송 시간 표시)
+- **날짜별 정리**: 날짜별 폴더에 방송인 이름이 포함된 디렉토리로 자동 정리
+- **Docker 지원**: Docker Compose로 간편한 배포 및 실행
 - **표준 출력 형식**: 표준화된 스키마로 `events.jsonl`, `peaks.json`, `chat_ts_*.csv` 출력
 
-## 설치
+## 빠른 시작 (Docker - 권장)
+
+Docker를 사용하면 Python 환경 설정 없이 바로 사용할 수 있습니다.
+
+### 1. 저장소 클론
 
 ```bash
-# 저장소로 이동
-cd nokchart
+git clone https://github.com/rieull0225/chzzk-chat-peak-analyze.git
+cd chzzk-chat-peak-analyze
+```
 
-# 의존성 설치 (Python 3.11+ 필요)
+### 2. 설정 파일 생성
+
+```bash
+# 예시 파일을 복사해서 실제 설정 파일 생성
+cp config.example.yaml config.yaml
+cp channels.example.yaml channels.yaml
+```
+
+### 3. 설정 파일 수정
+
+`config.yaml`에 API 키 입력:
+```yaml
+chzzk_client_id: "여기에_CLIENT_ID_입력"
+chzzk_client_secret: "여기에_CLIENT_SECRET_입력"
+```
+
+`channels.yaml`에 모니터링할 채널 입력:
+```yaml
+channels:
+  - "채널ID1"  # 방송인1
+  - "채널ID2"  # 방송인2
+```
+
+### 4. Docker 실행
+
+```bash
+docker-compose up -d
+```
+
+### 5. 로그 확인
+
+```bash
+docker logs -f nokchart
+```
+
+### 6. 수집 중단
+
+```bash
+docker-compose down
+```
+
+## 로컬 설치 (수동)
+
+Docker 없이 직접 실행하려면:
+
+```bash
+# Python 3.11+ 필요
 python3.11 -m pip install -e .
 
-# 개발용
-python3.11 -m pip install -e ".[dev]"
+# 실행
+nokchart watch --channels channels.yaml --config config.yaml
 ```
 
 ## 설정
@@ -47,7 +101,7 @@ python3.11 -m pip install -e ".[dev]"
 
 ### 2단계: config.yaml 설정
 
-API 인증 정보를 추가하고 수집 파라미터를 조정합니다:
+`config.example.yaml`을 `config.yaml`로 복사하고 설정을 조정합니다:
 
 ```yaml
 # 치지직 API 인증 정보
@@ -55,30 +109,40 @@ chzzk_client_id: "여기에_CLIENT_ID_입력"
 chzzk_client_secret: "여기에_CLIENT_SECRET_입력"
 
 # Watcher 설정
-poll_interval_sec: 60  # 방송 상태 확인 주기
-restart_resume: true   # 재시작 시 수집 재개
+poll_interval_sec: 60           # 방송 상태 확인 주기 (초)
+restart_resume: true            # 재시작 시 수집 재개
+idle_timeout_minutes: 30        # 채팅이 없으면 N분 후 자동 종료 및 데이터 처리
 
 # 피크 탐지 설정
-peak_window_sec: 60    # 피크 탐지 윈도우 크기
-topk: 50               # 추출할 상위 피크 개수
-min_peak_gap_sec: 120  # 피크 간 최소 간격
+peak_window_sec: 60             # 피크 탐지 윈도우 크기 (초)
+topk: 50                        # 추출할 상위 피크 개수
+min_peak_gap_sec: 120           # 피크 간 최소 간격 (초)
 
 # 집계 설정
-rolling_sec: 10        # 이동 평균 윈도우
+rolling_sec: 600                # 이동 평균 윈도우 (10분)
 
 # 출력 설정
-outdir: "output"       # 기본 출력 디렉토리
+outdir: "output"                # 기본 출력 디렉토리
+
+# 재시도 설정
+max_retries: 5
+backoff_factor: 2
 ```
 
 ### 3단계: channels.yaml 설정
 
-모니터링할 채널을 설정합니다:
+`channels.example.yaml`을 `channels.yaml`로 복사하고 모니터링할 채널을 설정합니다:
 
 ```yaml
 channels:
-  - "channel_id_1"
-  - "channel_id_2"
+  - "채널ID1"  # 방송인1
+  - "채널ID2"  # 방송인2
+  - "채널ID3"  # 방송인3
 ```
+
+**채널 ID 찾는 법**:
+1. 치지직 채널 페이지 접속
+2. URL에서 ID 확인: `https://chzzk.naver.com/live/채널ID`
 
 ## 사용법
 
@@ -135,20 +199,30 @@ nokchart plot --ts output/stream_123/chat_ts_1s.csv --peaks output/stream_123/pe
 
 ## 출력 구조
 
-각 스트림마다 NokChart는 다음을 생성합니다:
+NokChart는 날짜별로 폴더를 생성하고, 각 스트림마다 방송인 이름이 포함된 디렉토리에 데이터를 저장합니다:
 
 ```
 output/
-└── <stream_id>/
-    ├── events.jsonl              # 원시 채팅 이벤트 (JSONL 형식)
-    ├── chat_ts_1s.csv            # 1초 단위 시계열
-    ├── chat_ts_5s.csv            # 5초 단위 시계열
-    ├── chat_ts_60s.csv           # 60초 단위 시계열
-    ├── peaks.json                # 탐지된 채팅 피크
-    ├── chart_chat_rate.png       # 시각화 차트
-    ├── collection_report.json    # 수집 메타데이터
-    └── report.json               # 처리 보고서
+├── 2026-01-06/                          # 날짜별 폴더
+│   ├── 미라이_unknown_37716.../          # 방송인 이름_스트림ID
+│   │   ├── events.jsonl                # 원시 채팅 이벤트 (JSONL 형식)
+│   │   ├── chat_ts_60s.csv             # 1분 단위 시계열
+│   │   ├── chat_ts_300s.csv            # 5분 단위 시계열
+│   │   ├── peaks.json                  # 탐지된 채팅 피크
+│   │   ├── chart_chat_rate.png         # 시각화 차트 (실제 방송 시간 표시)
+│   │   ├── collection_report.json      # 수집 메타데이터
+│   │   └── report.json                 # 처리 보고서
+│   └── 바레사_unknown_cb40b.../
+│       └── ...
+├── 2026-01-07/                          # 다음 날
+│   └── ...
+└── ...
 ```
+
+**장점**:
+- 📅 날짜별로 자동 정리
+- 👤 방송인 이름으로 쉽게 식별
+- 🔍 같은 방송인의 여러 방송도 스트림 ID로 구분
 
 ## 출력 스키마
 
@@ -186,16 +260,31 @@ output/
 }
 ```
 
-### chat_ts_1s.csv
+### chat_ts_60s.csv
 
-시계열 데이터:
+1분 단위 시계열 데이터:
 
 ```csv
-sec,chat_count,chat_count_rolling_10s
-0,5,5.0
-1,8,6.5
-2,12,8.3
+sec,chat_count,timestamp,chat_count_rolling_600s
+0,150,2026-01-06T12:00:00+00:00,150.0
+60,180,2026-01-06T12:01:00+00:00,165.0
+120,200,2026-01-06T12:02:00+00:00,176.7
 ```
+
+- `sec`: 방송 시작 후 경과 시간 (초)
+- `chat_count`: 해당 1분 동안의 채팅 개수
+- `timestamp`: 실제 방송 시간
+- `chat_count_rolling_600s`: 10분 이동 평균
+
+## 기술 스택
+
+- **Python 3.11+**: 메인 프로그래밍 언어
+- **[chzzkpy](https://pypi.org/project/chzzkpy/)**: 공식 치지직 API 라이브러리
+- **asyncio**: 비동기 I/O 및 멀티채널 모니터링
+- **pandas**: 시계열 데이터 처리 및 집계
+- **matplotlib**: 채팅 활동 차트 시각화
+- **pydantic**: 데이터 검증 및 스키마 정의
+- **Docker**: 컨테이너화된 배포
 
 ## 중요 사항
 
@@ -208,9 +297,10 @@ sec,chat_count,chat_count_rolling_10s
 - ✅ DRM 우회나 비공식 스크래핑 없음
 - ✅ 플랫폼 이용약관 완전 준수
 
-`collector.py`의 `ChzzkClient`는 chzzkpy를 사용하여 구현되었으며 다음을 처리합니다:
+`collector.py`의 `ChzzkChannelClient`는 chzzkpy를 사용하여 구현되었으며 다음을 처리합니다:
 - `get_stream_status()`: 공식 API를 사용하여 채널 라이브 여부 확인
 - `connect_chat()`: 공식 WebSocket 연결을 사용하여 채팅 스트림에 연결
+- 세션 재사용으로 장시간 안정적인 채팅 수집
 
 ### 안전 및 정책
 
@@ -251,41 +341,73 @@ NokChart 출력물은 AutoKirinuki (VOD 편집 자동화 도구)의 입력으로
 
 ## 문제 해결
 
-### "Chzzk API credentials not provided" 오류
+### 수집 현황 확인
 
-1. `config.yaml`에 인증 정보를 추가했는지 확인:
-   ```yaml
-   chzzk_client_id: "실제_client_id"
-   chzzk_client_secret: "실제_client_secret"
-   ```
+실시간으로 수집된 채팅 개수를 확인하려면:
+
+```bash
+# 모든 스트림의 이벤트 개수 확인
+find output -name "events.jsonl" -type f -exec sh -c '
+    dir=$(dirname "{}");
+    dirname=$(basename "$dir");
+    count=$(wc -l < "{}" 2>/dev/null || echo "0");
+    echo "$dirname: $count 개"
+' \; | sort
+
+# 특정 스트림만 실시간 모니터링
+watch -n 1 'wc -l output/2026-01-06/미라이_*/events.jsonl'
+```
+
+### "Session is closed" 오류
+
+이전 버전에서 발생했던 세션 종료 버그는 수정되었습니다. 최신 버전을 사용하세요:
+```bash
+git pull origin main
+docker-compose down && docker-compose build && docker-compose up -d
+```
+
+### 채팅이 2~3분 후 중단됨
+
+status check 클라이언트가 채팅 클라이언트의 세션을 종료시키는 문제는 수정되었습니다. 이제 6시간+ 방송도 안정적으로 수집됩니다.
+
+### Docker 관련 문제
+
+**컨테이너가 시작되지 않음**:
+```bash
+# 로그 확인
+docker logs nokchart
+
+# 컨테이너 재시작
+docker-compose restart
+
+# 완전히 새로 시작
+docker-compose down && docker-compose up -d
+```
+
+**볼륨 권한 문제**:
+```bash
+# output 디렉토리 권한 확인
+ls -la output/
+
+# 권한 수정 (필요시)
+chmod -R 755 output/
+```
+
+### API 인증 문제
+
+**"Chzzk API credentials not provided" 오류**:
+1. `config.yaml`에 인증 정보를 추가했는지 확인
 2. [치지직 개발자센터](https://developers.chzzk.naver.com)에서 인증 정보 받기
 
-### OAuth 인증 오류
+**채널을 찾을 수 없음**:
+1. 채널 ID가 정확한지 확인
+2. 해당 채널이 실제로 방송 중인지 확인
 
-**리디렉션 URL 불일치**:
-- 개발자센터에서 리디렉션 URL을 정확히 `http://localhost:8080`으로 설정했는지 확인
-- URL은 대소문자 구분하며, 끝에 슬래시(/)를 붙이지 않습니다
+### 성능 문제
 
-**인증 코드 오류**:
-- 리디렉션 URL 전체가 아닌 `code=` 뒤의 값만 복사했는지 확인
-- 예시: `http://localhost:8080/?code=ABC123&state=...`에서 `ABC123` 부분만 입력
-- 인증 코드는 일정 시간 후 만료되므로 빠르게 입력해야 합니다
+**메모리 사용량이 높음**:
+- 6개 채널을 동시에 모니터링하면 정상적으로 메모리 사용량이 증가합니다
+- 필요 없는 채널은 `channels.yaml`에서 제거하세요
 
-### 이벤트가 수집되지 않음
-
-1. 채널 ID가 올바른지 확인
-2. 스트림이 실제로 라이브 중인지 확인
-3. API 인증 정보가 유효한지 확인
-4. 네트워크 연결 확인
-
-### 피크가 탐지되지 않음
-
-1. `chat_ts_1s.csv`에 데이터가 있는지 확인
-2. 채팅 활동이 충분히 높았는지 확인
-3. `peak_window_sec` 또는 `min_peak_gap_sec` 파라미터 조정
-
-### 차트 생성 실패
-
-1. matplotlib이 설치되어 있는지 확인
-2. 시계열 파일이 존재하고 유효한 데이터가 있는지 확인
-3. 출력 디렉토리에 쓰기 권한이 있는지 확인
+**CPU 사용량이 높음**:
+- `poll_interval_sec`를 늘려서 체크 빈도를 낮추세요 (예: 60 → 120)
