@@ -172,7 +172,7 @@ class Watcher:
         finally:
             # Generate collection report
             report = collector.generate_report()
-            report_path = Path(self.config.outdir) / stream_id / "collection_report.json"
+            report_path = collector.output_dir / "collection_report.json"
 
             import json
 
