@@ -77,10 +77,34 @@ class PeakDetector:
         return df
 
     def _calculate_window_sums(self, df: pd.DataFrame, window_sec: int) -> pd.DataFrame:
-        """Calculate sliding window sums."""
-        # Calculate rolling sum
+        """Calculate surge scores combining rate of change and absolute volume."""
         df = df.copy()
+
+        # 1. Absolute volume (rolling sum)
         df["window_sum"] = df["chat_count"].rolling(window=window_sec, min_periods=1).sum()
+
+        # 2. Rate of change (급등 감지)
+        # Use 5-second rolling average of chat count changes to smooth out noise
+        df["chat_rate_change"] = df["chat_count"].diff().rolling(window=5, min_periods=1).mean()
+
+        # 3. Normalize to 0-1 range (avoid division by zero)
+        sum_max = df["window_sum"].max()
+        sum_min = df["window_sum"].min()
+        if sum_max > sum_min:
+            df["norm_sum"] = (df["window_sum"] - sum_min) / (sum_max - sum_min)
+        else:
+            df["norm_sum"] = 0.0
+
+        change_max = df["chat_rate_change"].max()
+        change_min = df["chat_rate_change"].min()
+        if change_max > change_min:
+            df["norm_change"] = (df["chat_rate_change"] - change_min) / (change_max - change_min)
+        else:
+            df["norm_change"] = 0.0
+
+        # 4. Surge score = 70% change rate + 30% absolute volume
+        # This prioritizes sudden chat increases (급등) over sustained high volume
+        df["surge_score"] = df["norm_change"] * 0.7 + df["norm_sum"] * 0.3
 
         return df
 
@@ -94,12 +118,13 @@ class PeakDetector:
         """Find top K peaks with minimum gap constraint."""
         peaks = []
 
-        # Sort by window_sum descending
-        sorted_df = df.sort_values("window_sum", ascending=False)
+        # Sort by surge_score descending (급등 구간 우선)
+        sorted_df = df.sort_values("surge_score", ascending=False)
 
         for _, row in sorted_df.iterrows():
             start_sec = int(row["sec"])
             end_sec = start_sec + window_sec
+            # Store the actual chat count as value (for compatibility)
             value = int(row["window_sum"])
 
             # Check if this peak overlaps with existing peaks

@@ -147,22 +147,33 @@ class Watcher:
         # Start collector in background
         collector_task = asyncio.create_task(collector.start())
 
-        # Monitor for idle timeout
+        # Monitor for idle timeout with smart checking
         idle_detected = False
+        stop_reason = None
         try:
             while not collector_task.done():
                 # Check if collector is idle
                 if collector.is_idle():
-                    logger.info(
-                        f"Stream {stream_id} idle for {self.config.idle_timeout_minutes} minutes. "
-                        "Stopping collection and processing data."
-                    )
-                    idle_detected = True
-                    await collector.stop()
-                    break
+                    # Smart idle check: verify stream status and connection
+                    should_stop, reason = await collector.check_stream_and_connection()
 
-                # Check every 30 seconds
-                await asyncio.sleep(30)
+                    if should_stop:
+                        logger.info(
+                            f"Stream {stream_id} stopping: {reason}. "
+                            "Stopping collection and processing data."
+                        )
+                        idle_detected = True
+                        stop_reason = reason
+                        await collector.stop()
+                        break
+                    else:
+                        logger.info(
+                            f"Stream {stream_id} idle check: {reason}. "
+                            "Continuing collection (stream still active or reconnecting)."
+                        )
+
+                # Check every 10 seconds (more frequent for faster detection)
+                await asyncio.sleep(10)
 
             # Wait for collector to finish
             await collector_task
@@ -172,6 +183,8 @@ class Watcher:
         finally:
             # Generate collection report
             report = collector.generate_report()
+            if stop_reason:
+                report["stop_reason"] = stop_reason
             report_path = collector.output_dir / "collection_report.json"
 
             import json
@@ -179,7 +192,10 @@ class Watcher:
             with open(report_path, "w") as f:
                 json.dump(report, f, indent=2)
 
-            logger.info(f"Collector for stream {stream_id} finished. Report: {report_path}")
+            logger.info(
+                f"Collector for stream {stream_id} finished "
+                f"(reason: {stop_reason or 'normal'}). Report: {report_path}"
+            )
 
             # Process data if we have events
             if collector.event_count > 0:

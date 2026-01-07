@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from chzzkpy.unofficial.chat import ChatClient, ChatMessage, DonationMessage
+# Use custom chat client for better reliability
+from nokchart.chat import ChzzkChatClient, ChatMessage, DonationMessage, get_live_status
 
 from nokchart.models import ChatEvent, EventType, StreamInfo, StreamStatus
 
@@ -31,7 +32,7 @@ class ChzzkChannelClient:
             channel_id: Chzzk channel ID to monitor
         """
         self.channel_id = channel_id
-        self.client: Optional[ChatClient] = None
+        self.client: Optional[ChzzkChatClient] = None
         self._event_queue: asyncio.Queue = asyncio.Queue()
         self._connected = False
         self._connect_task: Optional[asyncio.Task] = None
@@ -42,22 +43,37 @@ class ChzzkChannelClient:
         if self.client is not None:
             return
 
-        logger.info(f"Initializing ChatClient for channel {self.channel_id}")
+        logger.info(f"Initializing ChzzkChatClient for channel {self.channel_id}")
 
-        # Create ChatClient for this specific channel
-        self.client = ChatClient(self.channel_id)
+        # Create ChzzkChatClient with robust reconnection
+        self.client = ChzzkChatClient(
+            channel_id=self.channel_id,
+            max_reconnect_attempts=20,  # More attempts for long streams
+            max_backoff=120.0,  # Max 2 minutes backoff
+        )
+
+        # Track connection state
+        self._disconnect_notified = False
 
         # Register event handlers
         @self.client.event
         async def on_chat(message: ChatMessage):
             """Handle incoming chat message."""
-            logger.info(f"📨 Received chat from {self.channel_id}: {message.profile.nickname}: {message.content}")
+            # Handle case where profile is None (system messages)
+            if message.profile:
+                nickname = message.profile.nickname
+                user_id_hash = message.profile.user_id_hash
+            else:
+                nickname = "Unknown"
+                user_id_hash = ""
+
+            logger.info(f"📨 Received chat from {self.channel_id}: {nickname}: {message.content}")
             event = {
                 'type': 'chat',
-                'user': message.profile.nickname,
-                'user_id': message.profile.user_id_hash,
+                'user': nickname,
+                'user_id': user_id_hash,
                 'text': message.content,
-                'message_id': message.msg_id if hasattr(message, 'msg_id') else None,
+                'message_id': message.msg_id,
                 'timestamp': datetime.now(timezone.utc),
             }
             await self._event_queue.put(event)
@@ -66,17 +82,48 @@ class ChzzkChannelClient:
         @self.client.event
         async def on_donation(message: DonationMessage):
             """Handle incoming donation."""
-            logger.info(f"💰 Received donation from {self.channel_id}: {message.profile.nickname if hasattr(message, 'profile') else 'Unknown'}")
+            # Handle case where profile is None
+            if message.profile:
+                nickname = message.profile.nickname
+                user_id_hash = message.profile.user_id_hash
+            else:
+                nickname = "Unknown"
+                user_id_hash = ""
+
+            logger.info(f"💰 Received donation from {self.channel_id}: {nickname}")
             event = {
                 'type': 'donation',
-                'user': message.profile.nickname if hasattr(message, 'profile') else None,
-                'user_id': message.profile.user_id_hash if hasattr(message, 'profile') else None,
-                'text': message.extras.message if hasattr(message, 'extras') and hasattr(message.extras, 'message') else '',
-                'amount': message.extras.pay_amount if hasattr(message, 'extras') and hasattr(message.extras, 'pay_amount') else 0,
+                'user': nickname,
+                'user_id': user_id_hash,
+                'text': message.content,
+                'amount': message.amount or 0,
                 'timestamp': datetime.now(timezone.utc),
             }
             await self._event_queue.put(event)
             logger.info(f"✅ Queued donation event from {self.channel_id}")
+
+        @self.client.event
+        async def on_connect():
+            """Handle connection established."""
+            logger.info(f"🔗 WebSocket connected for channel {self.channel_id}")
+            self._disconnect_notified = False
+
+        @self.client.event
+        async def on_disconnect():
+            """Handle connection lost."""
+            if not self._disconnect_notified:
+                logger.warning(
+                    f"⚠️  WebSocket disconnected for channel {self.channel_id}. "
+                    "Client will attempt to reconnect automatically."
+                )
+                self._disconnect_notified = True
+
+                # Put a special event to signal potential stream end check
+                await self._event_queue.put({
+                    'type': 'system',
+                    'event': 'disconnect',
+                    'timestamp': datetime.now(timezone.utc),
+                })
 
         logger.info(f"Registered event handlers for channel {self.channel_id}")
 
@@ -90,24 +137,21 @@ class ChzzkChannelClient:
         await self.initialize()
 
         try:
-            # Get live status using unofficial API
-            from chzzkpy.unofficial import Client
+            # Get live status using HTTP API
+            status = await get_live_status(self.channel_id)
 
-            # Reuse status client to avoid closing shared sessions
-            if self._status_client is None:
-                self._status_client = Client()
-                await self._status_client._async_setup_hook()
-
-            status = await self._status_client.live_status(channel_id=self.channel_id)
-
-            if status is None or status.status != "OPEN":
+            if status is None or status.get("status") != "OPEN":
                 logger.info(f"Channel {self.channel_id} is not live")
                 return None
 
+            # Extract stream information
+            live_id = status.get("liveId")
+            stream_id = f"{live_id}_{self.channel_id}" if live_id else f"unknown_{self.channel_id}"
+
             return StreamInfo(
-                stream_id=f"{status.live_id}_{self.channel_id}" if hasattr(status, 'live_id') else f"unknown_{self.channel_id}",
+                stream_id=stream_id,
                 channel_id=self.channel_id,
-                title=status.live_title if hasattr(status, 'live_title') else "Unknown",
+                title=status.get("liveTitle", "Unknown"),
                 status=StreamStatus.LIVE,
                 start_time=datetime.now(timezone.utc),
             )
@@ -121,7 +165,7 @@ class ChzzkChannelClient:
         Connect to chat stream and yield chat events.
 
         Yields:
-            Raw chat event dictionaries
+            Raw chat event dictionaries (filters out system events)
         """
         await self.initialize()
 
@@ -137,6 +181,12 @@ class ChzzkChannelClient:
             while True:
                 try:
                     event = await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
+
+                    # Filter out system events (used internally for disconnect notifications)
+                    if event.get('type') == 'system':
+                        logger.debug(f"System event received: {event.get('event')}")
+                        continue
+
                     yield event
                 except asyncio.TimeoutError:
                     # Check if client task is still running
@@ -191,7 +241,7 @@ class Collector:
         stream_info: StreamInfo,
         output_dir: Path,
         client: Optional[ChzzkChannelClient] = None,
-        idle_timeout_minutes: int = 30,
+        idle_timeout_minutes: int = 2,  # Changed to 2 minutes for smart detection
     ):
         self.stream_info = stream_info
         self.output_dir = output_dir
@@ -202,6 +252,7 @@ class Collector:
         self.start_time: Optional[datetime] = None
         self.last_event_time: Optional[datetime] = None
         self.idle_timeout_minutes = idle_timeout_minutes
+        self.last_idle_check_time: Optional[datetime] = None
 
     async def start(self):
         """Start collecting chat events."""
@@ -254,6 +305,50 @@ class Collector:
 
         idle_minutes = idle_duration.total_seconds() / 60
         return idle_minutes >= self.idle_timeout_minutes
+
+    async def check_stream_and_connection(self) -> tuple[bool, str]:
+        """
+        Check stream status and connection health when idle detected.
+
+        Returns:
+            Tuple of (should_stop: bool, reason: str)
+        """
+        logger.info(f"Idle detected ({self.idle_timeout_minutes}min). Checking stream and connection status...")
+
+        try:
+            # Check if stream is still live
+            status = await get_live_status(self.stream_info.channel_id)
+
+            if status is None or status.get("status") != "OPEN":
+                logger.info("Stream is no longer live. Stopping collection.")
+                return (True, "stream_ended")
+
+            # Stream is still live, check connection status
+            logger.info("Stream is still live. Checking connection status...")
+
+            if not self.client or not self.client.client:
+                logger.warning("Client not initialized")
+                return (True, "client_not_initialized")
+
+            if not self.client.client.is_connected:
+                logger.warning(
+                    "WebSocket disconnected but stream is live. "
+                    "Client should be reconnecting automatically. Continuing..."
+                )
+                return (False, "reconnecting")
+
+            # Stream is live and connected, but no chats
+            # This could be a quiet stream or connection issue
+            logger.warning(
+                f"Stream is live and connected, but no chats for {self.idle_timeout_minutes} minutes. "
+                "This might indicate a connection issue or very quiet stream."
+            )
+            return (False, "quiet_stream")
+
+        except Exception as e:
+            logger.error(f"Error checking stream/connection status: {e}", exc_info=True)
+            # On error, don't stop - let the normal idle timeout handle it
+            return (False, "check_error")
 
     async def _collect_events(self):
         """

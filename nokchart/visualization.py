@@ -56,19 +56,10 @@ class ChartGenerator:
         # Create figure
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Determine if we have timestamp data for actual broadcast time
-        use_actual_time = "timestamp" in df.columns and not df["timestamp"].isna().all()
-
-        if use_actual_time:
-            # Convert timestamp to datetime if needed
-            if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
-                df["timestamp"] = pd.to_datetime(df["timestamp"])
-            x_data = df["timestamp"]
-            x_label = "Broadcast Time (Local)"
-        else:
-            # Fallback to relative seconds
-            x_data = df["sec"]
-            x_label = "Time (seconds)"
+        # Use relative time from broadcast start (not actual clock time)
+        use_actual_time = False
+        x_data = df["sec"]
+        x_label = "Broadcast Elapsed Time"
 
         # Plot chat count
         ax.plot(x_data, df["chat_count"], linewidth=1, alpha=0.7, label="Chat Count")
@@ -88,26 +79,13 @@ class ChartGenerator:
         # Highlight peaks if provided
         if peaks and peaks.peaks:
             for peak in peaks.peaks[:10]:  # Highlight top 10 peaks
-                if use_actual_time:
-                    # Convert peak seconds to timestamps
-                    stream_start = df["timestamp"].min()
-                    peak_start = stream_start + pd.Timedelta(seconds=peak.start_sec)
-                    peak_end = stream_start + pd.Timedelta(seconds=peak.end_sec)
-                    ax.axvspan(
-                        peak_start,
-                        peak_end,
-                        alpha=0.2,
-                        color="yellow",
-                        label=f"Peak #{peak.rank}" if peak.rank <= 3 else None,
-                    )
-                else:
-                    ax.axvspan(
-                        peak.start_sec,
-                        peak.end_sec,
-                        alpha=0.2,
-                        color="yellow",
-                        label=f"Peak #{peak.rank}" if peak.rank <= 3 else None,
-                    )
+                ax.axvspan(
+                    peak.start_sec,
+                    peak.end_sec,
+                    alpha=0.2,
+                    color="yellow",
+                    label=f"Peak #{peak.rank}" if peak.rank <= 3 else None,
+                )
 
         # Format chart
         ax.set_xlabel(x_label, fontsize=12)
@@ -116,46 +94,22 @@ class ChartGenerator:
         ax.grid(True, alpha=0.3)
         ax.legend(loc="upper right")
 
-        # Format x-axis based on data type
-        if use_actual_time:
-            # Use matplotlib's date formatter for actual timestamps
-            import matplotlib.dates as mdates
-
-            # Determine time range for appropriate formatting
-            time_range = (df["timestamp"].max() - df["timestamp"].min()).total_seconds()
-
-            if time_range > 7200:  # More than 2 hours
-                # Show HH:MM format, ticks every 30 minutes
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=30))
-            elif time_range > 3600:  # More than 1 hour
-                # Show HH:MM format, ticks every 15 minutes
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=15))
-            else:
-                # Show HH:MM format, ticks every 5 minutes
-                ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-                ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
-
-            # Rotate labels for better readability
-            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+        # Format x-axis for relative time (broadcast elapsed time)
+        max_sec = df["sec"].max()
+        if max_sec > 3600:
+            # Show in hours - Every 10 minutes for long streams
+            tick_interval = 600  # Every 10 minutes
+        elif max_sec > 600:
+            # Show in minutes - Every 5 minutes for medium streams
+            tick_interval = 300
         else:
-            # Fallback to relative time formatting
-            max_sec = df["sec"].max()
-            if max_sec > 3600:
-                # Show in hours
-                tick_interval = 600  # Every 10 minutes
-            elif max_sec > 600:
-                # Show in minutes
-                tick_interval = 60
-            else:
-                tick_interval = 30
+            tick_interval = 60
 
-            # Set x-axis ticks
-            if max_sec > 0:
-                ticks = range(0, int(max_sec) + tick_interval, tick_interval)
-                ax.set_xticks(ticks)
-                ax.set_xticklabels([self._format_time(t) for t in ticks], rotation=45)
+        # Set x-axis ticks
+        if max_sec > 0:
+            ticks = range(0, int(max_sec) + tick_interval, tick_interval)
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([self._format_time(t) for t in ticks], rotation=45, ha='right')
 
         plt.tight_layout()
 

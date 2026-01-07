@@ -132,8 +132,10 @@ class Aggregator:
             grouped["chat_count"] = grouped["chat_count"].astype(int)
 
         # Add actual timestamp column (stream start + seconds elapsed)
+        # Convert to KST (UTC+9)
         if not grouped.empty:
             grouped["timestamp"] = stream_start_time + pd.to_timedelta(grouped["sec"], unit="s")
+            grouped["timestamp"] = grouped["timestamp"].dt.tz_convert("Asia/Seoul")
 
         return grouped
 

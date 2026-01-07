@@ -2,6 +2,11 @@
 requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nokchart*"]
+exclude = ["output*", "tests*"]
+
 [project]
 name = "nokchart"
 version = "0.1.0"
@@ -16,7 +21,8 @@ dependencies = [
     "matplotlib>=3.7.0",
     "pandas>=2.0.0",
     "click>=8.0.0",
-    "chzzkpy>=2.1.5",
+    # "chzzkpy>=2.1.5",  # Replaced with custom WebSocket client (nokchart.chat)
+    "aiohttp>=3.9.0",
 ]
 
 [project.optional-dependencies]
