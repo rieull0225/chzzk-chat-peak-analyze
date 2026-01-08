@@ -8,12 +8,18 @@ NokChart는 치지직 채널을 자동으로 모니터링하고, 방송이 시�
 
 - **자동 방송 모니터링**: 여러 채널을 감시하고 방송이 시작되면 자동으로 수집 시작
 - **채팅 이벤트 수집**: 정확한 타임스탬프와 함께 채팅 메시지 및 도네이션 수집
-- **세션 안정성**: 장시간 방송(6시간+) 동안 끊김 없는 채팅 수집
+- **강력한 WebSocket 안정성**:
+  - 자동 재연결 (지수 백오프, 최대 100회 시도)
+  - 하트비트 모니터링 (58초 타임아웃)
+  - 브라우저 헤더 스푸핑으로 연결 안정성 향상
+  - 장시간 방송(6시간+) 동안 끊김 없는 채팅 수집
+- **통계 조회**: `nokchart stats` 명령어로 수집 현황 실시간 확인
 - **피크 탐지**: 슬라이딩 윈도우 분석을 사용하여 높은 활동성을 보이는 채팅 구간 식별
 - **시계열 생성**: 1분, 5분 단위 시계열 및 이동 평균 생성
 - **시각화**: 피크 구간이 강조된 채팅 활동 추이 PNG 차트 생성 (실제 방송 시간 표시)
 - **날짜별 정리**: 날짜별 폴더에 방송인 이름이 포함된 디렉토리로 자동 정리
 - **Docker 지원**: Docker Compose로 간편한 배포 및 실행
+- **클라우드 배포**: GCP 무료 티어(e2-micro)에서 24시간 안정적 운영
 - **표준 출력 형식**: 표준화된 스키마로 `events.jsonl`, `peaks.json`, `chat_ts_*.csv` 출력
 
 ## 빠른 시작 (Docker - 권장)
@@ -66,6 +72,48 @@ docker logs -f nokchart
 
 ```bash
 docker-compose down
+```
+
+## 클라우드 배포 (GCP 무료 티어)
+
+24시간 안정적인 수집을 위해 GCP e2-micro 인스턴스(무료)에 배포할 수 있습니다.
+
+### GCP VM 설정
+
+```bash
+# 1. GCP e2-micro 인스턴스 생성 (us-west1 리전 - 무료)
+# 2. VM에 SSH 접속
+# 3. Docker 설치
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo apt-get install -y docker-compose-plugin
+
+# 4. 프로젝트 클론 및 실행
+git clone https://github.com/rieull0225/chzzk-chat-peak-analyze.git
+cd chzzk-chat-peak-analyze
+# config.yaml, channels.yaml 설정
+docker compose up -d
+```
+
+### 로컬과 동기화
+
+로컬 맥북에서 GCP VM 데이터를 주기적으로 가져옵니다:
+
+```bash
+# 동기화 스크립트 생성
+cat > ~/sync-nokchart.sh << 'EOF'
+#!/bin/bash
+gcloud compute scp --recurse \
+  --project=YOUR_PROJECT \
+  --zone=us-west1-a \
+  "USER@INSTANCE:chzzk-chat-peak-analyze/output" \
+  "$HOME/nokchart/output-gcp" 2>&1
+EOF
+
+chmod +x ~/sync-nokchart.sh
+
+# 매시간 자동 동기화 (크론잡)
+(crontab -l 2>/dev/null; echo "0 * * * * $HOME/sync-nokchart.sh >> $HOME/nokchart/sync.log 2>&1") | crontab -
 ```
 
 ## 로컬 설치 (수동)
@@ -160,6 +208,37 @@ nokchart watch --channels channels.yaml --config config.yaml
 3. 자동으로 채팅 이벤트 수집 시작
 4. 방송 종료 시 수집 중단
 5. 모든 출력 파일 자동 생성
+
+### 수집 통계 확인
+
+실시간으로 수집 현황을 확인합니다:
+
+```bash
+# 모든 수집 데이터 통계
+nokchart stats
+
+# 특정 날짜만 확인
+nokchart stats --date 2026-01-08
+
+# 특정 output 디렉토리 확인
+nokchart stats --output output-gcp
+```
+
+출력 예시:
+```
+================================================================================
+  📊 NokChart Collection Statistics
+================================================================================
+
+📅 2026-01-08
+📁 스트리머_unknown_xxxxxx
+
+  ⏱️  방송 시간: 13:00:00 ~ 15:30:00 (150.0분)
+  💬 채팅 수: 10,000개
+  💰 후원 수: 50개
+  📈 분당 채팅: 66.7개/분
+  ✅ 재연결: 0회
+```
 
 ### 기존 수집 데이터 처리
 
