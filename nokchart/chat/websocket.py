@@ -68,9 +68,16 @@ class ChzzkWebSocket:
         logger.info(f"Connecting to {url} (server_id={server_id})")
 
         try:
+            # Add headers to appear more like a real browser
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Origin": "https://chzzk.naver.com",
+                "Referer": "https://chzzk.naver.com/",
+            }
+
             session = aiohttp.ClientSession()
             ws = await asyncio.wait_for(
-                session.ws_connect(url),
+                session.ws_connect(url, headers=headers, heartbeat=30.0),
                 timeout=timeout,
             )
 

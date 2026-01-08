@@ -48,8 +48,8 @@ class ChzzkChannelClient:
         # Create ChzzkChatClient with robust reconnection
         self.client = ChzzkChatClient(
             channel_id=self.channel_id,
-            max_reconnect_attempts=20,  # More attempts for long streams
-            max_backoff=120.0,  # Max 2 minutes backoff
+            max_reconnect_attempts=100,  # Many attempts for unstable servers
+            max_backoff=30.0,  # Max 30 seconds backoff for faster recovery
         )
 
         # Track connection state
@@ -398,7 +398,7 @@ class Collector:
 
     def generate_report(self) -> dict:
         """Generate collection report."""
-        return {
+        report = {
             "stream_id": self.stream_info.stream_id,
             "channel_id": self.stream_info.channel_id,
             "event_count": self.event_count,
@@ -406,3 +406,10 @@ class Collector:
             "end_time": datetime.now(timezone.utc).isoformat(),
             "events_file": str(self.events_file),
         }
+
+        # Add client statistics if available
+        if self.client and self.client.client:
+            report["reconnect_count"] = self.client.client.total_reconnects
+            report["error_count"] = self.client.client.total_errors
+
+        return report

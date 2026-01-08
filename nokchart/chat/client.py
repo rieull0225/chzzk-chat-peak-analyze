@@ -55,6 +55,10 @@ class ChzzkChatClient:
         self._running = False
         self._event_handlers: Dict[str, Callable] = {}
 
+        # Statistics
+        self._total_reconnects = 0
+        self._total_errors = 0
+
         logger.info(f"Initialized ChzzkChatClient for channel {channel_id}")
 
     def event(self, func: Callable) -> Callable:
@@ -206,6 +210,7 @@ class ChzzkChatClient:
 
             except (ConnectionLostError, HeartbeatTimeoutError) as e:
                 logger.warning(f"Connection lost: {e}")
+                self._total_reconnects += 1
 
                 # Dispatch disconnect event
                 await self._dispatch_event("on_disconnect")
@@ -232,6 +237,7 @@ class ChzzkChatClient:
 
             except Exception as e:
                 logger.error(f"Unexpected error: {e}", exc_info=True)
+                self._total_errors += 1
                 # For unexpected errors, try to reconnect
                 if not await self._reconnection_manager.wait_before_reconnect():
                     raise MaxReconnectAttemptsError(
@@ -257,3 +263,13 @@ class ChzzkChatClient:
     def is_connected(self) -> bool:
         """Check if currently connected."""
         return self._websocket is not None and not self._websocket.closed
+
+    @property
+    def total_reconnects(self) -> int:
+        """Get total number of reconnections."""
+        return self._total_reconnects
+
+    @property
+    def total_errors(self) -> int:
+        """Get total number of errors."""
+        return self._total_errors

@@ -275,6 +275,128 @@ def plot(ts: Path, peaks: Path, out: Path, title: str):
 
 @cli.command()
 @click.option(
+    "--output",
+    type=click.Path(exists=True, path_type=Path),
+    default="output",
+    help="Output directory to analyze",
+)
+@click.option(
+    "--date",
+    help="Specific date to analyze (YYYY-MM-DD). If not provided, shows all dates.",
+)
+def stats(output: Path, date: str):
+    """Show collection statistics for all streams."""
+    from datetime import datetime
+
+    output_path = Path(output)
+    if not output_path.exists():
+        click.echo(f"❌ Output directory not found: {output_path}")
+        sys.exit(1)
+
+    # Find all stream directories
+    stream_dirs = []
+    if date:
+        date_dir = output_path / date
+        if date_dir.exists():
+            stream_dirs = [d for d in date_dir.iterdir() if d.is_dir()]
+    else:
+        for date_dir in sorted(output_path.iterdir()):
+            if date_dir.is_dir():
+                stream_dirs.extend([d for d in date_dir.iterdir() if d.is_dir()])
+
+    if not stream_dirs:
+        click.echo("📭 No streams found")
+        return
+
+    click.echo(f"\n{'='*80}")
+    click.echo(f"  📊 NokChart Collection Statistics")
+    click.echo(f"{'='*80}\n")
+
+    total_chats = 0
+    total_donations = 0
+    total_duration = 0
+
+    for stream_dir in sorted(stream_dirs):
+        events_file = stream_dir / "events.jsonl"
+        if not events_file.exists():
+            continue
+
+        # Parse directory name
+        dir_name = stream_dir.name
+        date_str = stream_dir.parent.name
+
+        # Load events
+        events = []
+        with open(events_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.strip():
+                    events.append(json.loads(line))
+
+        if not events:
+            continue
+
+        # Calculate statistics
+        chat_count = sum(1 for e in events if e.get('type') == 'chat')
+        donation_count = sum(1 for e in events if e.get('type') == 'donation')
+
+        # Parse timestamps
+        from datetime import datetime
+        start_time = datetime.fromisoformat(events[0]['received_at'].replace('Z', '+00:00'))
+        end_time = datetime.fromisoformat(events[-1]['received_at'].replace('Z', '+00:00'))
+        duration_sec = (end_time - start_time).total_seconds()
+        duration_min = duration_sec / 60
+
+        # Chat rate
+        chat_per_min = chat_count / duration_min if duration_min > 0 else 0
+
+        # Load collection report if available
+        report_file = stream_dir / "collection_report.json"
+        reconnect_count = None
+        error_count = None
+        if report_file.exists():
+            with open(report_file, 'r') as f:
+                report = json.load(f)
+                reconnect_count = report.get('reconnect_count', 0)
+                error_count = report.get('error_count', 0)
+
+        # Display
+        click.echo(f"📅 {date_str}")
+        click.echo(f"📁 {dir_name}")
+        click.echo(f"")
+        click.echo(f"  ⏱️  방송 시간: {start_time.strftime('%H:%M:%S')} ~ {end_time.strftime('%H:%M:%S')} ({duration_min:.1f}분)")
+        click.echo(f"  💬 채팅 수: {chat_count:,}개")
+        click.echo(f"  💰 후원 수: {donation_count}개")
+        click.echo(f"  📈 분당 채팅: {chat_per_min:.1f}개/분")
+
+        if reconnect_count is not None:
+            status = "✅" if reconnect_count == 0 else "⚠️"
+            click.echo(f"  {status} 재연결: {reconnect_count}회")
+
+        if error_count is not None and error_count > 0:
+            click.echo(f"  ❌ 에러: {error_count}회")
+
+        click.echo(f"")
+        click.echo(f"{'-'*80}\n")
+
+        total_chats += chat_count
+        total_donations += donation_count
+        total_duration += duration_min
+
+    # Summary
+    if total_duration > 0:
+        click.echo(f"{'='*80}")
+        click.echo(f"  📊 전체 요약")
+        click.echo(f"{'='*80}")
+        click.echo(f"  총 방송 수: {len(stream_dirs)}개")
+        click.echo(f"  총 방송 시간: {total_duration:.1f}분 ({total_duration/60:.1f}시간)")
+        click.echo(f"  총 채팅 수: {total_chats:,}개")
+        click.echo(f"  총 후원 수: {total_donations}개")
+        click.echo(f"  평균 분당 채팅: {total_chats/total_duration:.1f}개/분")
+        click.echo(f"{'='*80}\n")
+
+
+@cli.command()
+@click.option(
     "--stream-dir",
     type=click.Path(exists=True, path_type=Path),
     required=True,
