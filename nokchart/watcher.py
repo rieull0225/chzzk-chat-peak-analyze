@@ -119,7 +119,9 @@ class Watcher:
         # Create directory name with streamer name if available
         streamer_name = self.channel_names.get(stream_info.channel_id)
         if streamer_name:
-            dir_name = f"{streamer_name}_{stream_info.stream_id}"
+            # Remove "unknown_" prefix if present (when live_id is not available)
+            clean_stream_id = stream_info.stream_id.replace("unknown_", "", 1)
+            dir_name = f"{streamer_name}_{clean_stream_id}"
         else:
             dir_name = stream_info.stream_id
 
