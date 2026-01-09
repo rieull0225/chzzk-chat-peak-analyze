@@ -55,8 +55,8 @@ class Aggregator:
         # Convert t_ms to seconds
         chat_df["sec"] = (chat_df["t_ms"] / 1000).astype(int)
 
-        # Parse received_at timestamps for actual broadcast time
-        chat_df["received_at"] = pd.to_datetime(chat_df["received_at"])
+        # Parse received_at timestamps for actual broadcast time (UTC)
+        chat_df["received_at"] = pd.to_datetime(chat_df["received_at"], utc=True)
         # Get first event time as stream start reference
         stream_start_time = chat_df["received_at"].min()
 

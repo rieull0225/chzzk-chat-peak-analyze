@@ -339,10 +339,13 @@ def stats(output: Path, date: str):
         chat_count = sum(1 for e in events if e.get('type') == 'chat')
         donation_count = sum(1 for e in events if e.get('type') == 'donation')
 
-        # Parse timestamps
-        from datetime import datetime
-        start_time = datetime.fromisoformat(events[0]['received_at'].replace('Z', '+00:00'))
-        end_time = datetime.fromisoformat(events[-1]['received_at'].replace('Z', '+00:00'))
+        # Parse timestamps (UTC -> KST)
+        from datetime import datetime, timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        start_time_utc = datetime.fromisoformat(events[0]['received_at'].replace('Z', '+00:00'))
+        end_time_utc = datetime.fromisoformat(events[-1]['received_at'].replace('Z', '+00:00'))
+        start_time = start_time_utc.astimezone(kst)
+        end_time = end_time_utc.astimezone(kst)
         duration_sec = (end_time - start_time).total_seconds()
         duration_min = duration_sec / 60
 
@@ -438,7 +441,7 @@ def process(stream_dir: Path, stream_id: str):
     peaks_output = detector.detect_peaks(
         stream_id=stream_id,
         window_sec=60,
-        topk=50,
+        topk=20,
         min_gap_sec=120,
     )
 
