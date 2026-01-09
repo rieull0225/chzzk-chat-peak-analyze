@@ -100,21 +100,20 @@ docker compose up -d
 로컬 맥북에서 GCP VM 데이터를 주기적으로 가져옵니다:
 
 ```bash
-# 동기화 스크립트 생성
-cat > ~/sync-nokchart.sh << 'EOF'
-#!/bin/bash
-gcloud compute scp --recurse \
-  --project=YOUR_PROJECT \
-  --zone=us-west1-a \
-  "USER@INSTANCE:chzzk-chat-peak-analyze/output" \
-  "$HOME/nokchart/output-gcp" 2>&1
-EOF
+# 동기화 스크립트 사용 (프로젝트 내 포함)
+# scripts/sync-nokchart.sh를 수정하여 PROJECT, INSTANCE, ZONE 설정
 
-chmod +x ~/sync-nokchart.sh
+# 수동 실행
+./scripts/sync-nokchart.sh
 
 # 매시간 자동 동기화 (크론잡)
-(crontab -l 2>/dev/null; echo "0 * * * * $HOME/sync-nokchart.sh >> $HOME/nokchart/sync.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 * * * * cd $HOME/nokchart && ./scripts/sync-nokchart.sh >> $HOME/nokchart/sync.log 2>&1") | crontab -
 ```
+
+**동기화 스크립트 기능:**
+- GCP VM에서 로컬로 output 폴더 동기화
+- `unknown_*` 폴더를 자동으로 `방송인이름_*` 형식으로 리네임
+- 새로 수집된 스트림 자동 분석 (시계열, 피크 감지, 차트 생성)
 
 ## 로컬 설치 (수동)
 
