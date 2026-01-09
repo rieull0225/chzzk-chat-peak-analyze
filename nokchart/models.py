@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class EventType(str, Enum):
@@ -43,6 +43,24 @@ class Peak(BaseModel):
     end_sec: int
     value: int  # Chat count or spike score
     rank: int
+
+    @computed_field
+    @property
+    def start_time(self) -> str:
+        """Convert start_sec to HH:MM:SS format."""
+        hours = self.start_sec // 3600
+        minutes = (self.start_sec % 3600) // 60
+        seconds = self.start_sec % 60
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    @computed_field
+    @property
+    def end_time(self) -> str:
+        """Convert end_sec to HH:MM:SS format."""
+        hours = self.end_sec // 3600
+        minutes = (self.end_sec % 3600) // 60
+        seconds = self.end_sec % 60
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 class PeaksOutput(BaseModel):
