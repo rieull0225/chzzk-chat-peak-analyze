@@ -34,7 +34,7 @@ class PeakDetector:
             min_gap_sec: Minimum gap between peaks to avoid overlapping
 
         Returns:
-            PeaksOutput containing detected peaks
+            PeaksOutput containing detected peaks (both volume and surge based)
         """
         logger.info(
             f"Detecting peaks: window={window_sec}s, topk={topk}, min_gap={min_gap_sec}s"
@@ -45,20 +45,33 @@ class PeakDetector:
 
         if df.empty:
             logger.warning("Empty time series")
-            return PeaksOutput(stream_id=stream_id, window_sec=window_sec, peaks=[])
+            return PeaksOutput(
+                stream_id=stream_id,
+                window_sec=window_sec,
+                peaks_by_volume=[],
+                peaks_by_surge=[],
+            )
 
-        # Calculate sliding window sums
+        # Calculate sliding window sums and surge ratios
         window_sums = self._calculate_window_sums(df, window_sec)
 
-        # Find top peaks
-        peaks = self._find_top_peaks(window_sums, window_sec, topk, min_gap_sec)
+        # Find top peaks by volume
+        peaks_by_volume = self._find_top_peaks(
+            window_sums, window_sec, topk, min_gap_sec, sort_by="volume"
+        )
+        logger.info(f"Detected {len(peaks_by_volume)} peaks by volume")
 
-        logger.info(f"Detected {len(peaks)} peaks")
+        # Find top peaks by surge ratio
+        peaks_by_surge = self._find_top_peaks(
+            window_sums, window_sec, topk, min_gap_sec, sort_by="surge"
+        )
+        logger.info(f"Detected {len(peaks_by_surge)} peaks by surge ratio")
 
         return PeaksOutput(
             stream_id=stream_id,
             window_sec=window_sec,
-            peaks=peaks,
+            peaks_by_volume=peaks_by_volume,
+            peaks_by_surge=peaks_by_surge,
         )
 
     def _load_time_series(self) -> pd.DataFrame:
@@ -106,12 +119,27 @@ class PeakDetector:
         window_sec: int,
         topk: int,
         min_gap_sec: int,
+        sort_by: str = "volume",
     ) -> list[Peak]:
-        """Find top K peaks with minimum gap constraint based on surge ratio."""
+        """Find top K peaks with minimum gap constraint.
+
+        Args:
+            df: DataFrame with window_sum and surge_ratio columns
+            window_sec: Window size in seconds
+            topk: Number of top peaks to return
+            min_gap_sec: Minimum gap between peaks
+            sort_by: Sort criteria - "volume" or "surge"
+
+        Returns:
+            List of Peak objects sorted by rank
+        """
         peaks = []
 
-        # Sort by surge_ratio descending (급증 비율 높은 구간 우선)
-        sorted_df = df.sort_values("surge_ratio", ascending=False)
+        # Sort by specified criteria
+        if sort_by == "surge":
+            sorted_df = df.sort_values("surge_ratio", ascending=False)
+        else:  # "volume"
+            sorted_df = df.sort_values("window_sum", ascending=False)
 
         for _, row in sorted_df.iterrows():
             start_sec = int(row["sec"])
@@ -174,28 +202,28 @@ class PeakDetector:
         logger.info(f"Saved peaks to {output_file}")
 
     def generate_summary(self, peaks_output: PeaksOutput) -> dict:
-        """Generate summary of detected peaks."""
-        if not peaks_output.peaks:
+        """Generate summary of detected peaks (based on volume)."""
+        if not peaks_output.peaks_by_volume:
             return {
                 "peak_count": 0,
                 "total_activity": 0,
                 "avg_peak_value": 0,
             }
 
-        peak_values = [p.value for p in peaks_output.peaks]
+        peak_values = [p.value for p in peaks_output.peaks_by_volume]
 
         return {
-            "peak_count": len(peaks_output.peaks),
+            "peak_count": len(peaks_output.peaks_by_volume),
             "total_activity": sum(peak_values),
             "avg_peak_value": sum(peak_values) / len(peak_values),
             "max_peak_value": max(peak_values),
             "min_peak_value": min(peak_values),
             "top_peak": {
-                "rank": peaks_output.peaks[0].rank,
-                "start_sec": peaks_output.peaks[0].start_sec,
-                "end_sec": peaks_output.peaks[0].end_sec,
-                "value": peaks_output.peaks[0].value,
+                "rank": peaks_output.peaks_by_volume[0].rank,
+                "start_sec": peaks_output.peaks_by_volume[0].start_sec,
+                "end_sec": peaks_output.peaks_by_volume[0].end_sec,
+                "value": peaks_output.peaks_by_volume[0].value,
             }
-            if peaks_output.peaks
+            if peaks_output.peaks_by_volume
             else None,
         }

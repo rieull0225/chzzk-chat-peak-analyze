@@ -85,7 +85,8 @@ class PeaksOutput(BaseModel):
 
     stream_id: str
     window_sec: int
-    peaks: list[Peak]
+    peaks_by_volume: list[Peak] = Field(description="Peaks sorted by absolute chat volume")
+    peaks_by_surge: list[Peak] = Field(description="Peaks sorted by surge ratio")
 
 
 class StreamInfo(BaseModel):

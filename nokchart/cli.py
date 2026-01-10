@@ -448,7 +448,7 @@ def process(stream_dir: Path, stream_id: str):
     peaks_file = stream_dir / "peaks.json"
     detector.save_peaks(peaks_output, peaks_file)
     click.echo(f"  Created: {peaks_file}")
-    click.echo(f"  Found {len(peaks_output.peaks)} peaks")
+    click.echo(f"  Found {len(peaks_output.peaks_by_volume)} peaks (by volume), {len(peaks_output.peaks_by_surge)} peaks (by surge)")
 
     # Step 3: Generate chart
     click.echo("\nStep 3: Generating chart...")

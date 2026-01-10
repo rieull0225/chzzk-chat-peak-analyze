@@ -76,9 +76,9 @@ class ChartGenerator:
                 color="red",
             )
 
-        # Highlight peaks if provided
-        if peaks and peaks.peaks:
-            for peak in peaks.peaks[:10]:  # Highlight top 10 peaks
+        # Highlight peaks if provided (use volume-based peaks for chart)
+        if peaks and peaks.peaks_by_volume:
+            for peak in peaks.peaks_by_volume[:10]:  # Highlight top 10 peaks
                 ax.axvspan(
                     peak.start_sec,
                     peak.end_sec,

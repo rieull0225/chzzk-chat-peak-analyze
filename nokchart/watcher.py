@@ -250,7 +250,11 @@ class Watcher:
 
             peaks_file = output_dir / "peaks.json"
             detector.save_peaks(peaks_output, peaks_file)
-            logger.info(f"[{stream_id}] Created peaks: {peaks_file} ({len(peaks_output.peaks)} peaks)")
+            logger.info(
+                f"[{stream_id}] Created peaks: {peaks_file} "
+                f"({len(peaks_output.peaks_by_volume)} by volume, "
+                f"{len(peaks_output.peaks_by_surge)} by surge)"
+            )
 
             # Step 3: Generate chart
             logger.info(f"[{stream_id}] Generating chart...")
@@ -269,7 +273,8 @@ class Watcher:
                 "stream_id": stream_id,
                 "processing_completed": datetime.now().isoformat(),
                 "idle_timeout": idle_timeout,
-                "peaks_count": len(peaks_output.peaks),
+                "peaks_count_by_volume": len(peaks_output.peaks_by_volume),
+                "peaks_count_by_surge": len(peaks_output.peaks_by_surge),
                 "files": {
                     "events": str(events_file),
                     "time_series": str(ts_file),
