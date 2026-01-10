@@ -43,6 +43,13 @@ class Peak(BaseModel):
     end_sec: int
     value: int  # Chat count or spike score
     rank: int
+    surge_ratio: Optional[float] = None  # Surge ratio (current / previous average)
+
+    @computed_field
+    @property
+    def clip_start_sec(self) -> int:
+        """Get clip start time (10 seconds before peak start)."""
+        return max(0, self.start_sec - 10)
 
     @computed_field
     @property
@@ -60,6 +67,16 @@ class Peak(BaseModel):
         hours = self.end_sec // 3600
         minutes = (self.end_sec % 3600) // 60
         seconds = self.end_sec % 60
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    @computed_field
+    @property
+    def clip_start_time(self) -> str:
+        """Convert clip_start_sec to HH:MM:SS format (10 seconds before peak)."""
+        clip_sec = self.clip_start_sec
+        hours = clip_sec // 3600
+        minutes = (clip_sec % 3600) // 60
+        seconds = clip_sec % 60
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 

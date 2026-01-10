@@ -77,34 +77,26 @@ class PeakDetector:
         return df
 
     def _calculate_window_sums(self, df: pd.DataFrame, window_sec: int) -> pd.DataFrame:
-        """Calculate surge scores combining rate of change and absolute volume."""
+        """Calculate surge ratio based on chat volume increase."""
         df = df.copy()
 
-        # 1. Absolute volume (rolling sum)
+        # 1. Absolute volume (rolling sum for window)
         df["window_sum"] = df["chat_count"].rolling(window=window_sec, min_periods=1).sum()
 
-        # 2. Rate of change (급등 감지)
-        # Use 5-second rolling average of chat count changes to smooth out noise
-        df["chat_rate_change"] = df["chat_count"].diff().rolling(window=5, min_periods=1).mean()
+        # 2. Previous period average (60 seconds before)
+        # Calculate rolling average for the 60 seconds preceding each point
+        df["prev_avg"] = df["chat_count"].shift(60).rolling(window=60, min_periods=1).mean()
 
-        # 3. Normalize to 0-1 range (avoid division by zero)
-        sum_max = df["window_sum"].max()
-        sum_min = df["window_sum"].min()
-        if sum_max > sum_min:
-            df["norm_sum"] = (df["window_sum"] - sum_min) / (sum_max - sum_min)
-        else:
-            df["norm_sum"] = 0.0
+        # 3. Current period average (for the window)
+        df["curr_avg"] = df["chat_count"].rolling(window=window_sec, min_periods=1).mean()
 
-        change_max = df["chat_rate_change"].max()
-        change_min = df["chat_rate_change"].min()
-        if change_max > change_min:
-            df["norm_change"] = (df["chat_rate_change"] - change_min) / (change_max - change_min)
-        else:
-            df["norm_change"] = 0.0
+        # 4. Surge ratio = current average / previous average
+        # Use a small baseline to avoid division by zero and handle quiet periods
+        baseline = 1.0  # baseline chat rate
+        df["surge_ratio"] = df["curr_avg"] / (df["prev_avg"] + baseline)
 
-        # 4. Surge score = 70% change rate + 30% absolute volume
-        # This prioritizes sudden chat increases (급등) over sustained high volume
-        df["surge_score"] = df["norm_change"] * 0.7 + df["norm_sum"] * 0.3
+        # Fill NaN values with 1.0 (no surge)
+        df["surge_ratio"] = df["surge_ratio"].fillna(1.0)
 
         return df
 
@@ -115,17 +107,19 @@ class PeakDetector:
         topk: int,
         min_gap_sec: int,
     ) -> list[Peak]:
-        """Find top K peaks with minimum gap constraint."""
+        """Find top K peaks with minimum gap constraint based on surge ratio."""
         peaks = []
 
-        # Sort by surge_score descending (급등 구간 우선)
-        sorted_df = df.sort_values("surge_score", ascending=False)
+        # Sort by surge_ratio descending (급증 비율 높은 구간 우선)
+        sorted_df = df.sort_values("surge_ratio", ascending=False)
 
         for _, row in sorted_df.iterrows():
             start_sec = int(row["sec"])
             end_sec = start_sec + window_sec
             # Store the actual chat count as value (for compatibility)
             value = int(row["window_sum"])
+            # Store surge ratio for analysis
+            surge_ratio = float(row["surge_ratio"])
 
             # Check if this peak overlaps with existing peaks
             if self._is_valid_peak(peaks, start_sec, end_sec, min_gap_sec):
@@ -136,6 +130,7 @@ class PeakDetector:
                         end_sec=end_sec,
                         value=value,
                         rank=rank,
+                        surge_ratio=surge_ratio,
                     )
                 )
 
