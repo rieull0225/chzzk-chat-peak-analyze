@@ -22,6 +22,12 @@ gcloud compute scp --recurse \
 
 echo "$(date): Sync completed"
 
+# 동기화 후 중복 폴더 정리 (unknown_ 폴더 제거)
+echo "$(date): Cleaning up duplicate folders..."
+find "${LOCAL_PATH}/output" -type d -name "unknown_*" -exec rm -rf {} + 2>/dev/null || true
+find "${LOCAL_PATH}/output" -type d -name "*_unknown_*" -exec rm -rf {} + 2>/dev/null || true
+echo "$(date): Cleanup completed"
+
 # unknown_ 폴더 리네임 (채널 ID → 방송인 이름)
 echo "$(date): Renaming unknown_ folders..."
 
