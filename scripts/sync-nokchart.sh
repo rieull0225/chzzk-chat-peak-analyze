@@ -51,18 +51,20 @@ get_streamer_name() {
 find "${LOCAL_PATH}/output" -type d -name "unknown_*" | while read -r dir; do
     dir_name=$(basename "$dir")
 
-    # unknown_ 제거하여 stream_id 추출
-    # 형식: unknown_37716364b3086fefd298046072c92345 또는 unknown_12345_37716364...
-    stream_id="${dir_name#unknown_}"
+    # unknown_ 제거하여 나머지 추출
+    # 형식: unknown_150030_b6845db9a47441227410125f581eee31
+    # → 150030_b6845db9a47441227410125f581eee31
+    rest="${dir_name#unknown_}"
 
-    # stream_id에서 채널 ID 추출 (마지막 32자리)
-    channel_id="${stream_id: -32}"
+    # 채널 ID 추출 (마지막 32자리)
+    channel_id="${rest: -32}"
 
     # 매핑에서 방송인 이름 찾기
     streamer_name=$(get_streamer_name "$channel_id")
 
     if [ -n "$streamer_name" ]; then
-        new_name="${streamer_name}_${stream_id}"
+        # 새 이름: 마로카_150030_b6845...
+        new_name="${streamer_name}_${rest}"
         parent_dir=$(dirname "$dir")
         new_path="${parent_dir}/${new_name}"
 

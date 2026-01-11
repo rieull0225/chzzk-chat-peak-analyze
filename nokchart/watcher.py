@@ -114,16 +114,22 @@ class Watcher:
 
         # Create output directory with date folder
         from datetime import datetime, timezone
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        from zoneinfo import ZoneInfo
+
+        # Use KST for both date and time
+        kst = ZoneInfo('Asia/Seoul')
+        now_kst = datetime.now(timezone.utc).astimezone(kst)
+        date_str = now_kst.strftime("%Y-%m-%d")
+        time_str = now_kst.strftime("%H%M%S")  # HHMMSS format
 
         # Create directory name with streamer name if available
         streamer_name = self.channel_names.get(stream_info.channel_id)
         if streamer_name:
             # Remove "unknown_" prefix if present (when live_id is not available)
             clean_stream_id = stream_info.stream_id.replace("unknown_", "", 1)
-            dir_name = f"{streamer_name}_{clean_stream_id}"
+            dir_name = f"{streamer_name}_{time_str}_{clean_stream_id}"
         else:
-            dir_name = stream_info.stream_id
+            dir_name = f"{time_str}_{stream_info.stream_id}"
 
         output_dir = Path(self.config.outdir) / date_str / dir_name
         output_dir.mkdir(parents=True, exist_ok=True)
