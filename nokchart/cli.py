@@ -11,6 +11,7 @@ import click
 from nokchart.aggregation import Aggregator
 from nokchart.config import load_channels, load_channel_names, load_config
 from nokchart.peak_detection import PeakDetector
+from nokchart.topic_analysis import TopicAnalyzer, TopicsOutput
 from nokchart.visualization import ChartGenerator
 from nokchart.watcher import Watcher
 
@@ -226,6 +227,68 @@ def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: 
 
 @cli.command()
 @click.option(
+    "--events",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to events.jsonl file",
+)
+@click.option(
+    "--stream-id",
+    required=True,
+    help="Stream ID",
+)
+@click.option(
+    "--out",
+    type=click.Path(path_type=Path),
+    help="Output file path for topics.json",
+)
+@click.option(
+    "--segment",
+    type=int,
+    default=300,
+    help="Segment duration in seconds (default: 300 = 5 minutes)",
+)
+@click.option(
+    "--topk",
+    type=int,
+    default=5,
+    help="Number of top keywords per segment",
+)
+@click.option(
+    "--min-freq",
+    type=int,
+    default=3,
+    help="Minimum keyword frequency to include",
+)
+def topics(events: Path, stream_id: str, out: Path, segment: int, topk: int, min_freq: int):
+    """Extract topic keywords from chat segments."""
+    logger.info(f"Analyzing topics from {events}")
+
+    # Default output path
+    if out is None:
+        out = events.parent / "topics.json"
+
+    # Create analyzer and extract topics
+    analyzer = TopicAnalyzer(segment_sec=segment, top_k=topk, min_keyword_freq=min_freq)
+    topics_output = analyzer.analyze_events_file(events, stream_id)
+
+    # Save topics
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(topics_output.model_dump_json(indent=2))
+
+    click.echo(f"\nTopics saved to: {out}")
+    click.echo(f"\nSegments analyzed: {len(topics_output.segments)}")
+
+    # Show sample topics
+    if topics_output.segments:
+        click.echo(f"\nSample topics:")
+        for seg in topics_output.segments[:5]:
+            if seg.keywords:
+                click.echo(f"  {seg.start_time} - {seg.end_time}: {', '.join(seg.keywords[:3])}")
+
+
+@cli.command()
+@click.option(
     "--ts",
     type=click.Path(exists=True, path_type=Path),
     required=True,
@@ -237,6 +300,12 @@ def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: 
     help="Path to peaks.json file (optional)",
 )
 @click.option(
+    "--topics",
+    "topics_file",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to topics.json file (optional)",
+)
+@click.option(
     "--out",
     type=click.Path(path_type=Path),
     help="Output file path for chart image",
@@ -245,8 +314,8 @@ def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: 
     "--title",
     help="Chart title",
 )
-def plot(ts: Path, peaks: Path, out: Path, title: str):
-    """Generate chat activity chart."""
+def plot(ts: Path, peaks: Path, topics_file: Path, out: Path, title: str):
+    """Generate chat activity chart with optional topics track."""
     logger.info(f"Plotting chart from {ts}")
 
     # Default output path
@@ -262,11 +331,19 @@ def plot(ts: Path, peaks: Path, out: Path, title: str):
 
             peaks_data = PeaksOutput(**peaks_dict)
 
+    # Load topics if provided
+    topics_data = None
+    if topics_file:
+        with open(topics_file, encoding="utf-8") as f:
+            topics_dict = json.load(f)
+            topics_data = TopicsOutput(**topics_dict)
+
     # Generate chart
     generator = ChartGenerator(ts)
     generator.plot_chat_rate(
         output_file=out,
         peaks=peaks_data,
+        topics=topics_data,
         title=title,
     )
 
@@ -410,8 +487,19 @@ def stats(output: Path, date: str):
     required=True,
     help="Stream ID",
 )
-def process(stream_dir: Path, stream_id: str):
-    """Process a completed stream: build time series, detect peaks, and generate chart."""
+@click.option(
+    "--with-topics/--no-topics",
+    default=True,
+    help="Include topic analysis (default: enabled)",
+)
+@click.option(
+    "--segment-sec",
+    type=int,
+    default=300,
+    help="Topic segment duration in seconds (default: 300 = 5 minutes)",
+)
+def process(stream_dir: Path, stream_id: str, with_topics: bool, segment_sec: int):
+    """Process a completed stream: build time series, detect peaks, analyze topics, and generate chart."""
     logger.info(f"Processing stream directory: {stream_dir}")
 
     events_file = stream_dir / "events.jsonl"
@@ -450,13 +538,37 @@ def process(stream_dir: Path, stream_id: str):
     click.echo(f"  Created: {peaks_file}")
     click.echo(f"  Found {len(peaks_output.peaks_by_volume)} peaks (by volume), {len(peaks_output.peaks_by_surge)} peaks (by surge)")
 
-    # Step 3: Generate chart
-    click.echo("\nStep 3: Generating chart...")
+    # Step 3: Analyze topics (optional)
+    topics_output = None
+    topics_file = None
+    if with_topics:
+        click.echo("\nStep 3: Analyzing topics...")
+        analyzer = TopicAnalyzer(segment_sec=segment_sec, top_k=5, min_keyword_freq=3)
+        topics_output = analyzer.analyze_events_file(events_file, stream_id)
+
+        topics_file = stream_dir / "topics.json"
+        with open(topics_file, "w", encoding="utf-8") as f:
+            f.write(topics_output.model_dump_json(indent=2))
+
+        click.echo(f"  Created: {topics_file}")
+        click.echo(f"  Analyzed {len(topics_output.segments)} segments")
+
+        # Show sample topics
+        if topics_output.segments:
+            click.echo(f"  Sample topics:")
+            for seg in topics_output.segments[:3]:
+                if seg.keywords:
+                    click.echo(f"    {seg.start_time}: {', '.join(seg.keywords[:3])}")
+
+    # Step 4: Generate chart
+    step_num = 4 if with_topics else 3
+    click.echo(f"\nStep {step_num}: Generating chart...")
     chart_file = stream_dir / "chart_chat_rate.png"
     generator = ChartGenerator(ts_file)
     generator.plot_chat_rate(
         output_file=chart_file,
         peaks=peaks_output,
+        topics=topics_output,
     )
     click.echo(f"  Created: {chart_file}")
 
@@ -477,6 +589,10 @@ def process(stream_dir: Path, stream_id: str):
         "statistics": stats,
         "peaks_summary": summary,
     }
+
+    if topics_file:
+        report["files"]["topics"] = str(topics_file)
+        report["topics_segments"] = len(topics_output.segments) if topics_output else 0
 
     report_file = stream_dir / "report.json"
     with open(report_file, "w") as f:

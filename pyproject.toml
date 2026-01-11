@@ -33,6 +33,9 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+topics = [
+    "kiwipiepy>=0.17.0",  # Korean morphological analyzer for topic extraction
+]
 
 [project.scripts]
 nokchart = "nokchart.cli:cli"

@@ -10,6 +10,7 @@ from nokchart.collector import ChzzkChannelClient, Collector
 from nokchart.models import Config, StreamStatus
 from nokchart.aggregation import Aggregator
 from nokchart.peak_detection import PeakDetector
+from nokchart.topic_analysis import TopicAnalyzer
 from nokchart.visualization import ChartGenerator
 
 logger = logging.getLogger(__name__)
@@ -262,13 +263,24 @@ class Watcher:
                 f"{len(peaks_output.peaks_by_surge)} by surge)"
             )
 
-            # Step 3: Generate chart
+            # Step 3: Analyze topics
+            logger.info(f"[{stream_id}] Analyzing topics...")
+            analyzer = TopicAnalyzer(segment_sec=300, top_k=5, min_keyword_freq=3)
+            topics_output = analyzer.analyze_events_file(events_file, stream_id)
+
+            topics_file = output_dir / "topics.json"
+            with open(topics_file, "w", encoding="utf-8") as f:
+                f.write(topics_output.model_dump_json(indent=2))
+            logger.info(f"[{stream_id}] Created topics: {topics_file} ({len(topics_output.segments)} segments)")
+
+            # Step 4: Generate chart
             logger.info(f"[{stream_id}] Generating chart...")
             chart_file = output_dir / "chart_chat_rate.png"
             generator = ChartGenerator(ts_file)
             generator.plot_chat_rate(
                 output_file=chart_file,
                 peaks=peaks_output,
+                topics=topics_output,
             )
             logger.info(f"[{stream_id}] Created chart: {chart_file}")
 
@@ -281,10 +293,12 @@ class Watcher:
                 "idle_timeout": idle_timeout,
                 "peaks_count_by_volume": len(peaks_output.peaks_by_volume),
                 "peaks_count_by_surge": len(peaks_output.peaks_by_surge),
+                "topics_segments": len(topics_output.segments),
                 "files": {
                     "events": str(events_file),
                     "time_series": str(ts_file),
                     "peaks": str(peaks_file),
+                    "topics": str(topics_file),
                     "chart": str(chart_file),
                 }
             }
