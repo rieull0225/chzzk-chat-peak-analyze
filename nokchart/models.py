@@ -48,8 +48,8 @@ class Peak(BaseModel):
     @computed_field
     @property
     def clip_start_sec(self) -> int:
-        """Get clip start time (10 seconds before peak start)."""
-        return max(0, self.start_sec - 10)
+        """Get clip start time (20 seconds before peak start)."""
+        return max(0, self.start_sec - 20)
 
     @computed_field
     @property
