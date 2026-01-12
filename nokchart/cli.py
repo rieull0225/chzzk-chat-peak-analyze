@@ -512,7 +512,7 @@ def process(stream_dir: Path, stream_id: str, with_topics: bool, segment_sec: in
     aggregator = Aggregator(events_file)
     output_files = aggregator.build_time_series(
         output_dir=stream_dir,
-        bucket_sizes=[60, 300],  # 1분, 5분 단위
+        bucket_sizes=[10, 60, 300],  # 10초, 1분, 5분 단위
         rolling_window=600,  # 10분 rolling average
     )
 
@@ -520,7 +520,7 @@ def process(stream_dir: Path, stream_id: str, with_topics: bool, segment_sec: in
         logger.error("Failed to build time series")
         sys.exit(1)
 
-    ts_file = output_files.get("60s")  # Use 1-minute bucket
+    ts_file = output_files.get("10s")  # Use 10-second bucket for peak detection
     click.echo(f"  Created: {ts_file}")
 
     # Step 2: Detect peaks

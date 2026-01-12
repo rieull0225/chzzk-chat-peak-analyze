@@ -234,7 +234,7 @@ class Watcher:
             aggregator = Aggregator(events_file)
             output_files = aggregator.build_time_series(
                 output_dir=output_dir,
-                bucket_sizes=[60, 300],  # 1분, 5분 단위
+                bucket_sizes=[10, 60, 300],  # 10초, 1분, 5분 단위
                 rolling_window=self.config.rolling_sec,
             )
 
@@ -242,7 +242,7 @@ class Watcher:
                 logger.error(f"[{stream_id}] Failed to build time series")
                 return
 
-            ts_file = output_files.get("60s")  # Use 1-minute bucket for charts
+            ts_file = output_files.get("10s")  # Use 10-second bucket for peak detection
             logger.info(f"[{stream_id}] Created time series: {ts_file}")
 
             # Step 2: Detect peaks
