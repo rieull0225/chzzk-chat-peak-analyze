@@ -245,14 +245,15 @@ class Watcher:
             ts_file = output_files.get("10s")  # Use 10-second bucket for peak detection
             logger.info(f"[{stream_id}] Created time series: {ts_file}")
 
-            # Step 2: Detect peaks
-            logger.info(f"[{stream_id}] Detecting peaks...")
+            # Step 2: Detect peaks (2-stage: 10s rough -> 1s precise)
+            logger.info(f"[{stream_id}] Detecting peaks (2-stage)...")
             detector = PeakDetector(ts_file)
             peaks_output = detector.detect_peaks(
                 stream_id=stream_id,
                 window_sec=self.config.peak_window_sec,
                 topk=self.config.topk,
                 min_gap_sec=self.config.min_peak_gap_sec,
+                events_file=events_file,  # For 1-second precision refinement
             )
 
             peaks_file = output_dir / "peaks.json"

@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 
@@ -21,20 +22,26 @@ class PeakDetector:
         self,
         stream_id: str,
         window_sec: int = 60,
-        topk: int = 50,
+        topk: int = 20,
         min_gap_sec: int = 120,
+        events_file: Optional[Path] = None,
     ) -> PeaksOutput:
         """
         Detect peaks in chat activity using sliding window.
+
+        Two-stage detection:
+        1. First pass: 10-second sliding window to find rough peaks
+        2. Second pass: 1-second precision refinement for exact peak timing
 
         Args:
             stream_id: Stream identifier
             window_sec: Window size in seconds for peak detection
             topk: Number of top peaks to return
             min_gap_sec: Minimum gap between peaks to avoid overlapping
+            events_file: Optional path to events.jsonl for 1-second precision refinement
 
         Returns:
-            PeaksOutput containing detected peaks (both volume and surge based)
+            PeaksOutput containing detected peaks by volume
         """
         logger.info(
             f"Detecting peaks: window={window_sec}s, topk={topk}, min_gap={min_gap_sec}s"
@@ -55,11 +62,19 @@ class PeakDetector:
         # Calculate sliding window sums and surge ratios
         window_sums = self._calculate_window_sums(df, window_sec, bucket_size)
 
-        # Find top peaks by volume
+        # Find top peaks by volume (first pass - 10-second precision)
         peaks_by_volume = self._find_top_peaks(
             window_sums, window_sec, topk, min_gap_sec, sort_by="volume"
         )
-        logger.info(f"Detected {len(peaks_by_volume)} peaks by volume")
+        logger.info(f"[1차] Detected {len(peaks_by_volume)} peaks by volume (10s precision)")
+
+        # Second pass: Refine peaks with 1-second precision if events_file is provided
+        if events_file and events_file.exists() and peaks_by_volume:
+            logger.info(f"[2차] Refining peaks with 1-second precision...")
+            peaks_by_volume = self._refine_peaks_with_events(
+                peaks_by_volume, events_file, window_sec
+            )
+            logger.info(f"[2차] Refined {len(peaks_by_volume)} peaks to 1-second precision")
 
         # Find top peaks by surge ratio
         peaks_by_surge = self._find_top_peaks(
@@ -214,6 +229,108 @@ class PeakDetector:
                 return False
 
         return True
+
+    def _refine_peaks_with_events(
+        self,
+        peaks: list[Peak],
+        events_file: Path,
+        window_sec: int,
+    ) -> list[Peak]:
+        """Refine peak timing with 1-second precision using raw events.
+
+        Args:
+            peaks: List of peaks from first pass (10-second precision)
+            events_file: Path to events.jsonl file
+            window_sec: Window size in seconds
+
+        Returns:
+            List of peaks with refined start times (1-second precision)
+        """
+        # Load events and extract t_ms for timing
+        events_df = self._load_events_for_refinement(events_file)
+        if events_df.empty:
+            logger.warning("No events loaded for refinement, keeping original peaks")
+            return peaks
+
+        refined_peaks = []
+        for peak in peaks:
+            # Search region: ±60 seconds around original peak (wider for better precision)
+            search_start = max(0, peak.start_sec - 60)
+            search_end = peak.end_sec + 60
+
+            # Extract events in search region
+            region_events = events_df[
+                (events_df["sec"] >= search_start) & (events_df["sec"] < search_end)
+            ]
+
+            if region_events.empty:
+                refined_peaks.append(peak)
+                continue
+
+            # Build 1-second buckets for this region
+            sec_counts = region_events.groupby("sec").size().reset_index(name="count")
+
+            # Create full range of seconds (including zeros)
+            all_secs = pd.DataFrame({"sec": range(search_start, search_end)})
+            sec_counts = all_secs.merge(sec_counts, on="sec", how="left").fillna(0)
+            sec_counts["count"] = sec_counts["count"].astype(int)
+
+            # Find best 60-second window with 1-second sliding
+            best_start = peak.start_sec
+            best_value = 0
+
+            for start in range(search_start, search_end - window_sec + 1):
+                window_sum = sec_counts[
+                    (sec_counts["sec"] >= start) & (sec_counts["sec"] < start + window_sec)
+                ]["count"].sum()
+
+                if window_sum > best_value:
+                    best_value = window_sum
+                    best_start = start
+
+            # Create refined peak
+            refined_peak = Peak(
+                start_sec=best_start,
+                end_sec=best_start + window_sec,
+                value=int(best_value),
+                rank=peak.rank,
+                surge_ratio=peak.surge_ratio,
+            )
+            refined_peaks.append(refined_peak)
+
+            if best_start != peak.start_sec:
+                logger.info(
+                    f"  Peak {peak.rank}: {peak.start_sec}s -> {best_start}s "
+                    f"(+{best_start - peak.start_sec}s, value: {best_value})"
+                )
+
+        return refined_peaks
+
+    def _load_events_for_refinement(self, events_file: Path) -> pd.DataFrame:
+        """Load events from jsonl and extract timing information.
+
+        Args:
+            events_file: Path to events.jsonl
+
+        Returns:
+            DataFrame with 'sec' column (seconds from stream start)
+        """
+        events = []
+        try:
+            with open(events_file, "r") as f:
+                for line in f:
+                    if line.strip():
+                        event = json.loads(line)
+                        if "t_ms" in event:
+                            events.append({"sec": event["t_ms"] // 1000})
+        except Exception as e:
+            logger.error(f"Error loading events for refinement: {e}")
+            return pd.DataFrame()
+
+        if not events:
+            return pd.DataFrame()
+
+        return pd.DataFrame(events)
 
     def save_peaks(self, peaks_output: PeaksOutput, output_file: Path):
         """Save peaks to JSON file."""

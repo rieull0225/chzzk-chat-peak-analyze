@@ -189,13 +189,26 @@ def build_ts(events: Path, out: Path, buckets: str, rolling: int):
     default=120,
     help="Minimum gap between peaks in seconds",
 )
-def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: int):
+@click.option(
+    "--events-file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to events.jsonl for 1-second precision refinement",
+)
+def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: int, events_file: Path):
     """Detect peaks in chat activity time series."""
     logger.info(f"Detecting peaks in {ts}")
 
     # Default output path
     if out is None:
         out = ts.parent / "peaks.json"
+
+    # Auto-detect events file if not provided
+    if events_file is None:
+        auto_events = ts.parent / "events.jsonl"
+        if auto_events.exists():
+            events_file = auto_events
+            logger.info(f"Auto-detected events file: {events_file}")
 
     # Create detector and find peaks
     detector = PeakDetector(ts)
@@ -204,6 +217,7 @@ def peaks(ts: Path, stream_id: str, out: Path, window: int, topk: int, min_gap: 
         window_sec=window,
         topk=topk,
         min_gap_sec=min_gap,
+        events_file=events_file,
     )
 
     # Save peaks
@@ -523,14 +537,17 @@ def process(stream_dir: Path, stream_id: str, with_topics: bool, segment_sec: in
     ts_file = output_files.get("10s")  # Use 10-second bucket for peak detection
     click.echo(f"  Created: {ts_file}")
 
-    # Step 2: Detect peaks
+    # Step 2: Detect peaks (2-stage: 10s rough -> 1s precise)
     click.echo("\nStep 2: Detecting peaks...")
+    click.echo("  [1차] 10초 슬라이딩 윈도우로 대략적 피크 탐지...")
+    click.echo("  [2차] 1초 단위로 정밀 시작점 보정...")
     detector = PeakDetector(ts_file)
     peaks_output = detector.detect_peaks(
         stream_id=stream_id,
         window_sec=60,
         topk=20,
         min_gap_sec=120,
+        events_file=events_file,  # For 1-second precision refinement
     )
 
     peaks_file = stream_dir / "peaks.json"
