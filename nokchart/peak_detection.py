@@ -40,8 +40,8 @@ class PeakDetector:
             f"Detecting peaks: window={window_sec}s, topk={topk}, min_gap={min_gap_sec}s"
         )
 
-        # Load time series
-        df = self._load_time_series()
+        # Load time series and detect bucket size
+        df, bucket_size = self._load_time_series()
 
         if df.empty:
             logger.warning("Empty time series")
@@ -53,7 +53,7 @@ class PeakDetector:
             )
 
         # Calculate sliding window sums and surge ratios
-        window_sums = self._calculate_window_sums(df, window_sec)
+        window_sums = self._calculate_window_sums(df, window_sec, bucket_size)
 
         # Find top peaks by volume
         peaks_by_volume = self._find_top_peaks(
@@ -74,34 +74,57 @@ class PeakDetector:
             peaks_by_surge=peaks_by_surge,
         )
 
-    def _load_time_series(self) -> pd.DataFrame:
-        """Load time series from CSV file."""
+    def _load_time_series(self) -> tuple[pd.DataFrame, int]:
+        """Load time series from CSV file and detect bucket size.
+
+        Returns:
+            Tuple of (DataFrame, bucket_size_sec)
+        """
         if not self.time_series_file.exists():
             logger.error(f"Time series file not found: {self.time_series_file}")
-            return pd.DataFrame()
+            return pd.DataFrame(), 1
 
         df = pd.read_csv(self.time_series_file)
 
         if "sec" not in df.columns or "chat_count" not in df.columns:
             logger.error("Invalid time series format: missing 'sec' or 'chat_count' columns")
-            return pd.DataFrame()
+            return pd.DataFrame(), 1
 
-        logger.info(f"Loaded time series: {len(df)} rows")
-        return df
+        # Detect bucket size from time series interval
+        bucket_size = 1
+        if len(df) >= 2:
+            bucket_size = int(df["sec"].iloc[1] - df["sec"].iloc[0])
+            if bucket_size <= 0:
+                bucket_size = 1
 
-    def _calculate_window_sums(self, df: pd.DataFrame, window_sec: int) -> pd.DataFrame:
-        """Calculate surge ratio based on chat volume increase."""
+        logger.info(f"Loaded time series: {len(df)} rows, bucket_size={bucket_size}s")
+        return df, bucket_size
+
+    def _calculate_window_sums(self, df: pd.DataFrame, window_sec: int, bucket_size: int) -> pd.DataFrame:
+        """Calculate surge ratio based on chat volume increase.
+
+        Args:
+            df: Time series DataFrame
+            window_sec: Window size in seconds
+            bucket_size: Time series bucket size in seconds
+        """
         df = df.copy()
 
+        # Convert window_sec to number of rows based on bucket_size
+        window_rows = max(1, window_sec // bucket_size)
+        prev_window_rows = max(1, 60 // bucket_size)  # 60 seconds for previous average
+
+        logger.info(f"Window: {window_sec}s = {window_rows} rows (bucket={bucket_size}s)")
+
         # 1. Absolute volume (rolling sum for window)
-        df["window_sum"] = df["chat_count"].rolling(window=window_sec, min_periods=1).sum()
+        df["window_sum"] = df["chat_count"].rolling(window=window_rows, min_periods=1).sum()
 
         # 2. Previous period average (60 seconds before)
-        # Calculate rolling average for the 60 seconds preceding each point
-        df["prev_avg"] = df["chat_count"].shift(60).rolling(window=60, min_periods=1).mean()
+        # Calculate rolling average for the period preceding each point
+        df["prev_avg"] = df["chat_count"].shift(prev_window_rows).rolling(window=prev_window_rows, min_periods=1).mean()
 
         # 3. Current period average (for the window)
-        df["curr_avg"] = df["chat_count"].rolling(window=window_sec, min_periods=1).mean()
+        df["curr_avg"] = df["chat_count"].rolling(window=window_rows, min_periods=1).mean()
 
         # 4. Surge ratio = current average / previous average
         # Use a small baseline to avoid division by zero and handle quiet periods
