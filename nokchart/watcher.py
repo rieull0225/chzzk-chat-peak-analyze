@@ -65,12 +65,16 @@ class Watcher:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _check_channel(self, channel_id: str):
-        """Check status of a single channel with retry logic."""
+        """Check status of a single channel with retry logic and timeout."""
         retries = 0
         client = self.clients[channel_id]
         while retries < self.config.max_retries:
             try:
-                stream_info = await client.get_stream_status()
+                # Add timeout to prevent hanging forever
+                stream_info = await asyncio.wait_for(
+                    client.get_stream_status(),
+                    timeout=30.0  # 30 second timeout for status check
+                )
 
                 if stream_info is None:
                     logger.warning(f"Channel {channel_id} not found")
@@ -93,6 +97,20 @@ class Watcher:
 
                 self.previous_status[channel_id] = current
                 break
+
+            except asyncio.TimeoutError:
+                retries += 1
+                logger.warning(
+                    f"Timeout checking channel {channel_id} (attempt {retries}). "
+                    "Resetting client state."
+                )
+                # Reset client state on timeout to prevent stuck state
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+                if retries >= self.config.max_retries:
+                    logger.error(f"Failed to check channel {channel_id} after {retries} timeouts")
 
             except Exception as e:
                 retries += 1
@@ -214,6 +232,11 @@ class Watcher:
             # Remove from active collectors
             if stream_id in self.active_collectors:
                 del self.active_collectors[stream_id]
+
+            # Reset previous status to OFFLINE so next live can be detected
+            channel_id = collector.stream_info.channel_id
+            self.previous_status[channel_id] = StreamStatus.OFFLINE
+            logger.info(f"Reset status for channel {channel_id} to OFFLINE after collection ended")
 
     async def _process_stream_data(self, stream_id: str, output_dir: Path, idle_timeout: bool):
         """Process collected stream data: build time series, detect peaks, generate chart.

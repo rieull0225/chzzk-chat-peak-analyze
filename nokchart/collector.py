@@ -207,7 +207,7 @@ class ChzzkChannelClient:
             logger.error(f"Error in chat event handler for {self.channel_id}: {e}", exc_info=True)
             raise
         finally:
-            # Clean up
+            # Clean up and reset for potential reuse
             if self._connect_task:
                 self._connect_task.cancel()
                 try:
@@ -215,8 +215,14 @@ class ChzzkChannelClient:
                 except asyncio.CancelledError:
                     pass
 
+            # Reset client state so it can be reinitialized for status checks
+            if self.client:
+                await self.client.close()
+                self.client = None
+            logger.info(f"Chat connection ended for {self.channel_id}, client reset for reuse")
+
     async def close(self):
-        """Close client connection."""
+        """Close client connection and reset state for reuse."""
         if self._connect_task:
             self._connect_task.cancel()
             try:
@@ -226,11 +232,21 @@ class ChzzkChannelClient:
 
         if self.client:
             await self.client.close()
+            # Reset client so it can be reinitialized for next collection
+            self.client = None
 
         if self._status_client:
             await self._status_client.close()
 
-        logger.info(f"Closed ChatClient for channel {self.channel_id}")
+        # Clear event queue
+        while not self._event_queue.empty():
+            try:
+                self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        self._connected = False
+        logger.info(f"Closed and reset ChatClient for channel {self.channel_id}")
 
 
 class Collector:
