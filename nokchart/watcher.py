@@ -61,8 +61,22 @@ class Watcher:
 
     async def _check_all_channels(self):
         """Check status of all monitored channels."""
-        tasks = [self._check_channel(channel_id) for channel_id in self.channel_ids]
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Check channels that are not currently collecting
+        channels_to_check = [
+            ch_id for ch_id in self.channel_ids
+            if not any(
+                c.stream_info.channel_id == ch_id
+                for c in self.active_collectors.values()
+            )
+        ]
+
+        tasks = [self._check_channel(channel_id) for channel_id in channels_to_check]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Log any exceptions that occurred
+        for channel_id, result in zip(channels_to_check, results):
+            if isinstance(result, Exception):
+                logger.error(f"Unexpected error checking channel {channel_id}: {result}", exc_info=result)
 
     async def _check_channel(self, channel_id: str):
         """Check status of a single channel with retry logic and timeout."""
@@ -96,7 +110,7 @@ class Watcher:
                     await self._stop_collection(channel_id)
 
                 self.previous_status[channel_id] = current
-                break
+                return  # Success - exit the function
 
             except asyncio.TimeoutError:
                 retries += 1

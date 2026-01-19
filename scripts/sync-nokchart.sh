@@ -4,20 +4,20 @@
 PROJECT="chzzk-chat-receiver"
 INSTANCE="instance-20260108-152205"
 ZONE="us-west1-a"
-REMOTE_PATH="chzzk-chat-peak-analyze/output"
+REMOTE_PATH="nokchart/output"
 LOCAL_PATH="$HOME/nokchart/output-gcp"
 
 echo "$(date): Syncing data from GCP VM..."
 mkdir -p "$LOCAL_PATH"
 
-# gcloud 경로 로드
-source ~/google-cloud-sdk/path.zsh.inc
+# gcloud 경로
+GCLOUD="$HOME/google-cloud-sdk/bin/gcloud"
 
 # GCP → 로컬 동기화
-gcloud compute scp --recurse \
+$GCLOUD compute scp --recurse \
   --project="$PROJECT" \
   --zone="$ZONE" \
-  "mangnaniee@${INSTANCE}:${REMOTE_PATH}" \
+  "minjunpark@${INSTANCE}:~/${REMOTE_PATH}" \
   "${LOCAL_PATH}" 2>&1 | grep -v "WARNING"
 
 echo "$(date): Sync completed"
