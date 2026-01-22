@@ -61,20 +61,12 @@ class Watcher:
 
     async def _check_all_channels(self):
         """Check status of all monitored channels."""
-        # Check channels that are not currently collecting
-        channels_to_check = [
-            ch_id for ch_id in self.channel_ids
-            if not any(
-                c.stream_info.channel_id == ch_id
-                for c in self.active_collectors.values()
-            )
-        ]
-
-        tasks = [self._check_channel(channel_id) for channel_id in channels_to_check]
+        # Check all channels (including those currently collecting to detect new broadcasts)
+        tasks = [self._check_channel(channel_id) for channel_id in self.channel_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Log any exceptions that occurred
-        for channel_id, result in zip(channels_to_check, results):
+        for channel_id, result in zip(self.channel_ids, results):
             if isinstance(result, Exception):
                 logger.error(f"Unexpected error checking channel {channel_id}: {result}", exc_info=result)
 
@@ -97,8 +89,29 @@ class Watcher:
                 previous = self.previous_status.get(channel_id, StreamStatus.OFFLINE)
                 current = stream_info.status
 
-                # Detect OFFLINE -> LIVE transition
-                if previous == StreamStatus.OFFLINE and current == StreamStatus.LIVE:
+                # Check if there's an active collector for this channel
+                active_collector = None
+                for collector in self.active_collectors.values():
+                    if collector.stream_info.channel_id == channel_id:
+                        active_collector = collector
+                        break
+
+                # Detect new broadcast while already collecting (live_id changed)
+                if active_collector and current == StreamStatus.LIVE:
+                    old_live_id = active_collector.stream_info.live_id
+                    new_live_id = stream_info.live_id
+                    if old_live_id != new_live_id:
+                        logger.info(
+                            f"Channel {channel_id} started NEW broadcast! "
+                            f"Old live_id: {old_live_id}, New live_id: {new_live_id}"
+                        )
+                        # Stop old collection and start new one
+                        await self._stop_collection(channel_id)
+                        await asyncio.sleep(1)  # Brief pause to ensure cleanup
+                        await self._start_collection(stream_info)
+
+                # Detect OFFLINE -> LIVE transition (no active collector)
+                elif not active_collector and previous == StreamStatus.OFFLINE and current == StreamStatus.LIVE:
                     logger.info(
                         f"Channel {channel_id} went live! Stream ID: {stream_info.stream_id}"
                     )

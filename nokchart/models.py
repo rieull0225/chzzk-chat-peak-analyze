@@ -94,6 +94,7 @@ class StreamInfo(BaseModel):
 
     stream_id: str
     channel_id: str
+    live_id: Optional[str] = None  # Unique ID for each broadcast session
     title: Optional[str] = None
     status: StreamStatus
     start_time: Optional[datetime] = None

@@ -151,6 +151,7 @@ class ChzzkChannelClient:
             return StreamInfo(
                 stream_id=stream_id,
                 channel_id=self.channel_id,
+                live_id=live_id,  # Store live_id to detect new broadcasts
                 title=status.get("liveTitle", "Unknown"),
                 status=StreamStatus.LIVE,
                 start_time=datetime.now(timezone.utc),
