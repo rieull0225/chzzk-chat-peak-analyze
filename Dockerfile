@@ -1,9 +1,12 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including Korean fonts
 RUN apt-get update && apt-get install -y \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    fonts-nanum \
+    fontconfig \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -fv
 
 # Set working directory
 WORKDIR /app

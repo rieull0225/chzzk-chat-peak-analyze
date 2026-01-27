@@ -6,6 +6,7 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.font_manager as fm
 import pandas as pd
 
 from nokchart.models import PeaksOutput
@@ -14,8 +15,22 @@ from nokchart.topic_analysis import TopicsOutput
 logger = logging.getLogger(__name__)
 
 # Korean font configuration
-plt.rcParams["font.family"] = ["AppleGothic", "Malgun Gothic", "NanumGothic", "sans-serif"]
-plt.rcParams["axes.unicode_minus"] = False
+def _setup_korean_font():
+    """Setup Korean font for matplotlib."""
+    # Try to find NanumGothic font (installed via fonts-nanum package)
+    nanum_fonts = [f for f in fm.fontManager.ttflist if 'Nanum' in f.name]
+    if nanum_fonts:
+        font_name = nanum_fonts[0].name
+        plt.rcParams["font.family"] = font_name
+        logger.info(f"Using Korean font: {font_name}")
+    else:
+        # Fallback to system fonts
+        plt.rcParams["font.family"] = ["AppleGothic", "Malgun Gothic", "NanumGothic", "sans-serif"]
+        logger.warning("NanumGothic font not found, using fallback fonts")
+
+    plt.rcParams["axes.unicode_minus"] = False
+
+_setup_korean_font()
 
 
 class ChartGenerator:
