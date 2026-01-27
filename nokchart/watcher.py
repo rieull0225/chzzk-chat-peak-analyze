@@ -83,7 +83,9 @@ class Watcher:
                 )
 
                 if stream_info is None:
-                    logger.warning(f"Channel {channel_id} not found")
+                    # Channel is offline or not found - update status accordingly
+                    logger.info(f"Channel {channel_id} is offline")
+                    self.previous_status[channel_id] = StreamStatus.OFFLINE
                     return
 
                 previous = self.previous_status.get(channel_id, StreamStatus.OFFLINE)
@@ -110,10 +112,11 @@ class Watcher:
                         await asyncio.sleep(1)  # Brief pause to ensure cleanup
                         await self._start_collection(stream_info)
 
-                # Detect OFFLINE -> LIVE transition (no active collector)
-                elif not active_collector and previous == StreamStatus.OFFLINE and current == StreamStatus.LIVE:
+                # Detect LIVE stream without active collector - start collection
+                elif not active_collector and current == StreamStatus.LIVE:
                     logger.info(
-                        f"Channel {channel_id} went live! Stream ID: {stream_info.stream_id}"
+                        f"Channel {channel_id} is live without collector! "
+                        f"Stream ID: {stream_info.stream_id}. Starting collection."
                     )
                     await self._start_collection(stream_info)
 
