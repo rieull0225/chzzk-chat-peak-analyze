@@ -140,7 +140,27 @@ class ChzzkChannelClient:
             # Get live status using HTTP API
             status = await get_live_status(self.channel_id)
 
-            if status is None or status.get("status") != "OPEN":
+            if status is None:
+                logger.info(f"Channel {self.channel_id} is not live (no status)")
+                return None
+
+            # Check livePollingStatusJson for actual streaming status
+            # The outer "status" field can be "CLOSE" even when streaming
+            is_live = False
+            polling_json = status.get("livePollingStatusJson")
+            if polling_json:
+                import json
+                try:
+                    polling = json.loads(polling_json)
+                    is_live = polling.get("isPublishing", False)
+                except json.JSONDecodeError:
+                    pass
+
+            # Fallback to status field if no polling JSON
+            if not is_live:
+                is_live = status.get("status") == "OPEN"
+
+            if not is_live:
                 logger.info(f"Channel {self.channel_id} is not live")
                 return None
 
