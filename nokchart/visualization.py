@@ -46,9 +46,11 @@ class ChartGenerator:
         topics: Optional[TopicsOutput] = None,
         title: Optional[str] = None,
         figsize: Optional[tuple[int, int]] = None,
+        max_hours_per_chart: float = 2.0,
     ):
         """
         Plot chat rate over time with optional topic labels.
+        If broadcast is longer than max_hours_per_chart, splits into multiple images.
 
         Args:
             output_file: Path to save the plot
@@ -56,6 +58,7 @@ class ChartGenerator:
             topics: Optional topics to show as labels above the chart
             title: Optional chart title
             figsize: Optional figure size (width, height). If None, auto-calculated based on duration.
+            max_hours_per_chart: Maximum hours per chart before splitting (default: 2.0)
         """
         logger.info(f"Plotting chat rate to {output_file}")
 
@@ -66,17 +69,78 @@ class ChartGenerator:
             logger.warning("Empty time series, skipping plot")
             return
 
-        # Calculate dynamic figure size based on duration
         max_sec = df["sec"].max()
+        max_sec_per_chart = max_hours_per_chart * 3600
+
+        # Split into multiple charts if needed
+        if max_sec > max_sec_per_chart:
+            num_charts = int(max_sec // max_sec_per_chart) + (1 if max_sec % max_sec_per_chart else 0)
+            logger.info(f"Splitting into {num_charts} charts ({max_sec/3600:.1f}h total, {max_hours_per_chart}h per chart)")
+
+            for i in range(num_charts):
+                start_sec = i * max_sec_per_chart
+                end_sec = min((i + 1) * max_sec_per_chart, max_sec)
+
+                # Filter data for this segment
+                segment_df = df[(df["sec"] >= start_sec) & (df["sec"] < end_sec)].copy()
+                if segment_df.empty:
+                    continue
+
+                # Filter peaks for this segment
+                segment_peaks = None
+                if peaks and peaks.peaks_by_volume:
+                    filtered_peaks = [p for p in peaks.peaks_by_volume if p.start_sec < end_sec and p.end_sec > start_sec]
+                    if filtered_peaks:
+                        segment_peaks = PeaksOutput(
+                            stream_id=peaks.stream_id,
+                            peaks_by_volume=filtered_peaks,
+                            peaks_by_surge=[]
+                        )
+
+                # Filter topics for this segment
+                segment_topics = None
+                if topics and topics.segments:
+                    filtered_segments = [s for s in topics.segments if s.start_sec < end_sec and s.end_sec > start_sec]
+                    if filtered_segments:
+                        segment_topics = TopicsOutput(stream_id=topics.stream_id, segments=filtered_segments)
+
+                # Generate output filename with part number
+                stem = output_file.stem
+                suffix = output_file.suffix
+                part_file = output_file.parent / f"{stem}_part{i+1}{suffix}"
+
+                # Chart title with time range
+                start_time = self._format_time(int(start_sec))
+                end_time = self._format_time(int(end_sec))
+                part_title = f"{title or 'Chat Activity'} ({start_time} - {end_time})"
+
+                self._plot_single_chart(segment_df, part_file, segment_peaks, segment_topics, part_title, figsize, start_sec, end_sec)
+
+            return
+
+        # Single chart for short broadcasts
+        self._plot_single_chart(df, output_file, peaks, topics, title, figsize, 0, max_sec)
+
+    def _plot_single_chart(
+        self,
+        df: pd.DataFrame,
+        output_file: Path,
+        peaks: Optional[PeaksOutput],
+        topics: Optional[TopicsOutput],
+        title: Optional[str],
+        figsize: Optional[tuple[int, int]],
+        start_sec: float,
+        end_sec: float,
+    ):
+        """Plot a single chart segment."""
+        duration_sec = end_sec - start_sec
+
+        # Calculate dynamic figure size based on duration
         if figsize is None:
-            # Base: 16 inches per hour, minimum 16 inches
-            width = max(16, int((max_sec / 3600) * 16))
-            # Cap at 100 inches to avoid extremely large images
-            width = min(width, 100)
-            # Add extra height for topic track if topics are provided
+            width = max(16, int((duration_sec / 3600) * 16))
+            width = min(width, 50)
             height = 7 if topics and topics.segments else 6
             figsize = (width, height)
-            logger.info(f"Auto-calculated figure size: {figsize} for {max_sec:.0f}s ({max_sec/3600:.1f}h)")
 
         # Create figure
         fig, ax = plt.subplots(figsize=figsize)
@@ -124,20 +188,22 @@ class ChartGenerator:
         ax.legend(loc="upper right")
 
         # Format x-axis for relative time (broadcast elapsed time)
-        max_sec = df["sec"].max()
-        if max_sec > 3600:
-            # Show in hours - Every 10 minutes for long streams
+        min_sec = int(df["sec"].min())
+        max_sec = int(df["sec"].max())
+        duration = max_sec - min_sec
+
+        if duration > 3600:
             tick_interval = 600  # Every 10 minutes
-        elif max_sec > 600:
-            # Show in minutes - Every 5 minutes for medium streams
-            tick_interval = 300
+        elif duration > 600:
+            tick_interval = 300  # Every 5 minutes
         else:
             tick_interval = 60
 
-        # Set x-axis ticks
+        # Set x-axis ticks starting from segment start
         if max_sec > 0:
-            ticks = range(0, int(max_sec) + tick_interval, tick_interval)
-            ax.set_xticks(ticks)
+            start_tick = (min_sec // tick_interval) * tick_interval
+            ticks = range(start_tick, max_sec + tick_interval, tick_interval)
+            ax.set_xticks(list(ticks))
             ax.set_xticklabels([self._format_time(t) for t in ticks], rotation=45, ha='right')
 
         plt.tight_layout()

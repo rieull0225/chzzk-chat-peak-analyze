@@ -18,9 +18,30 @@ $GCLOUD compute scp --recurse \
   --project="$PROJECT" \
   --zone="$ZONE" \
   "minjunpark@${INSTANCE}:~/${REMOTE_PATH}" \
-  "${LOCAL_PATH}" 2>&1 | grep -v "WARNING"
+  "${LOCAL_PATH}"
 
 echo "$(date): Sync completed"
+
+# 현재 GCP에서 수집 중인 스트림만 삭제
+echo "$(date): Checking active collectors on GCP..."
+ACTIVE_STREAMS=$($GCLOUD compute ssh "minjunpark@${INSTANCE}" \
+  --project="$PROJECT" \
+  --zone="$ZONE" \
+  --command="sudo docker logs nokchart 2>&1 | grep -oP 'Starting collection for stream \K[^ ]+' | sort -u" 2>/dev/null)
+
+FINISHED_STREAMS=$($GCLOUD compute ssh "minjunpark@${INSTANCE}" \
+  --project="$PROJECT" \
+  --zone="$ZONE" \
+  --command="sudo docker logs nokchart 2>&1 | grep -oP 'Collector for stream \K[^ ]+' | sort -u" 2>/dev/null)
+
+# 시작됐지만 끝나지 않은 스트림 = 현재 수집 중
+for stream in $ACTIVE_STREAMS; do
+    if ! echo "$FINISHED_STREAMS" | grep -q "^${stream}$"; then
+        echo "  Removing (currently collecting): $stream"
+        find "${LOCAL_PATH}/output" -type d -name "*${stream}*" -exec rm -rf {} + 2>/dev/null
+    fi
+done
+echo "$(date): Active streams removed"
 
 # 동기화 후 중복 폴더 정리 (unknown_ 폴더 제거)
 echo "$(date): Cleaning up duplicate folders..."
@@ -89,17 +110,17 @@ find "${LOCAL_PATH}/output" -type d -name "*_*" | while read -r stream_dir; do
     if [ ! -f "$stream_dir/events.jsonl" ]; then
         continue
     fi
-    
+
     # peaks.json이 이미 있으면 스킵
     if [ -f "$stream_dir/peaks.json" ]; then
         continue
     fi
-    
+
     # 스트림 ID 추출 (디렉토리 이름)
     stream_id=$(basename "$stream_dir")
-    
+
     echo "  Processing: $stream_id"
-    
+
     # nokchart process 실행 (시계열 + 피크 + 차트)
     python3 -m nokchart.cli process \
         --stream-dir "$stream_dir" \
