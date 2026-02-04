@@ -144,21 +144,10 @@ class ChzzkChannelClient:
                 logger.info(f"Channel {self.channel_id} is not live (no status)")
                 return None
 
-            # Check livePollingStatusJson for actual streaming status
-            # The outer "status" field can be "CLOSE" even when streaming
-            is_live = False
-            polling_json = status.get("livePollingStatusJson")
-            if polling_json:
-                import json
-                try:
-                    polling = json.loads(polling_json)
-                    is_live = polling.get("isPublishing", False)
-                except json.JSONDecodeError:
-                    pass
-
-            # Fallback to status field if no polling JSON
-            if not is_live:
-                is_live = status.get("status") == "OPEN"
+            # Use the outer "status" field as the primary indicator
+            # Note: isPublishing in livePollingStatusJson is always true regardless
+            # of actual live state, so we don't use it.
+            is_live = status.get("status") == "OPEN"
 
             if not is_live:
                 logger.info(f"Channel {self.channel_id} is not live")
