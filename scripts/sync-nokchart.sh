@@ -13,12 +13,16 @@ mkdir -p "$LOCAL_PATH"
 # gcloud 경로
 GCLOUD="$HOME/google-cloud-sdk/bin/gcloud"
 
-# GCP → 로컬 동기화
-$GCLOUD compute scp --recurse \
+# GCP → 로컬 동기화 (rsync로 변경된 파일만)
+GCP_IP=$($GCLOUD compute instances describe "$INSTANCE" \
   --project="$PROJECT" \
   --zone="$ZONE" \
-  "minjunpark@${INSTANCE}:~/${REMOTE_PATH}" \
-  "${LOCAL_PATH}"
+  --format="get(networkInterfaces[0].accessConfigs[0].natIP)" 2>/dev/null)
+
+rsync -avz --progress \
+  -e "ssh -o StrictHostKeyChecking=no -i ~/.ssh/google_compute_engine" \
+  "minjunpark@${GCP_IP}:~/${REMOTE_PATH}/" \
+  "${LOCAL_PATH}/output/"
 
 echo "$(date): Sync completed"
 
@@ -47,6 +51,15 @@ echo "$(date): Active streams removed"
 echo "$(date): Cleaning up duplicate folders..."
 find "${LOCAL_PATH}/output" -type d -name "unknown_*" -exec rm -rf {} + 2>/dev/null || true
 find "${LOCAL_PATH}/output" -type d -name "*_unknown_*" -exec rm -rf {} + 2>/dev/null || true
+
+# 빈 디렉토리 삭제 (events.jsonl이 없는 스트림 디렉토리)
+echo "$(date): Removing empty stream directories..."
+find "${LOCAL_PATH}/output" -mindepth 2 -maxdepth 2 -type d | while read -r dir; do
+    if [ ! -f "$dir/events.jsonl" ]; then
+        echo "  Removing empty: $(basename "$dir")"
+        rm -rf "$dir"
+    fi
+done
 echo "$(date): Cleanup completed"
 
 # unknown_ 폴더 리네임 (채널 ID → 방송인 이름)

@@ -65,10 +65,18 @@ class Watcher:
         tasks = [self._check_channel(channel_id) for channel_id in self.channel_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Log any exceptions that occurred
+        # Log polling cycle summary
+        errors = []
         for channel_id, result in zip(self.channel_ids, results):
             if isinstance(result, Exception):
+                errors.append(channel_id)
                 logger.error(f"Unexpected error checking channel {channel_id}: {result}", exc_info=result)
+
+        active = list(self.active_collectors.keys())
+        logger.info(
+            f"Poll complete: {len(self.channel_ids)} channels checked, "
+            f"{len(errors)} errors, {len(active)} collecting"
+        )
 
     async def _check_channel(self, channel_id: str):
         """Check status of a single channel with retry logic and timeout."""

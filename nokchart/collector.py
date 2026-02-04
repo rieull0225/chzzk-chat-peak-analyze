@@ -67,7 +67,7 @@ class ChzzkChannelClient:
                 nickname = "Unknown"
                 user_id_hash = ""
 
-            logger.info(f"📨 Received chat from {self.channel_id}: {nickname}: {message.content}")
+            logger.debug(f"📨 Received chat from {self.channel_id}: {nickname}: {message.content}")
             event = {
                 'type': 'chat',
                 'user': nickname,
@@ -77,7 +77,7 @@ class ChzzkChannelClient:
                 'timestamp': datetime.now(timezone.utc),
             }
             await self._event_queue.put(event)
-            logger.info(f"✅ Queued chat event from {self.channel_id}")
+            logger.debug(f"✅ Queued chat event from {self.channel_id}")
 
         @self.client.event
         async def on_donation(message: DonationMessage):
@@ -100,7 +100,7 @@ class ChzzkChannelClient:
                 'timestamp': datetime.now(timezone.utc),
             }
             await self._event_queue.put(event)
-            logger.info(f"✅ Queued donation event from {self.channel_id}")
+            logger.debug(f"✅ Queued donation event from {self.channel_id}")
 
         @self.client.event
         async def on_connect():
